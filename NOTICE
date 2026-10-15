@@ -1,0 +1,7 @@
+Putered SDK
+Copyright 2026 Putered contributors
+
+Initial SDK and plugin builder extracted from EwanJordaan/Putered,
+commit d3da39b3b3da1ad16d8e56ca8710f952c7191548.
+This repository contains the client, shared contracts and local plugin builder;
+the server is maintained separately. Third-party dependencies retain their licenses.

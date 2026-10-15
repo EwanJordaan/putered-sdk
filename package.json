@@ -1,0 +1,65 @@
+{
+  "name": "@putered/sdk",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Typed Putered client, local plugins, stored binary assets, and optional plugin builder",
+  "files": [
+    "dist",
+    "LICENSE",
+    "NOTICE",
+    "README.md"
+  ],
+  "bin": {
+    "putered": "dist/client/cli.js"
+  },
+  "engines": {
+    "node": ">=22.13"
+  },
+  "dependencies": {
+    "ajv": "8.17.1",
+    "ajv-formats": "3.0.1",
+    "zod": "4.1.12"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/client/sdk.d.ts",
+      "import": "./dist/client/sdk.js"
+    },
+    "./plugins": {
+      "types": "./dist/tool-definition.d.ts",
+      "import": "./dist/tool-definition.js"
+    },
+    "./packaging": {
+      "types": "./dist/tool-artifact.d.ts",
+      "import": "./dist/tool-artifact.js"
+    },
+    "./build": {
+      "types": "./dist/tool-package.d.ts",
+      "import": "./dist/tool-package.js"
+    }
+  },
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/EwanJordaan/putered-sdk.git"
+  },
+  "homepage": "https://github.com/EwanJordaan/putered-sdk#readme",
+  "bugs": {
+    "url": "https://github.com/EwanJordaan/putered-sdk/issues"
+  },
+  "scripts": {
+    "build": "tsc",
+    "test": "npm run build && npm run test:types && node --test test/*.test.mjs",
+    "test:types": "npm run build:plugin -- examples/typed-tools/word-count.ts examples/typed-tools/word-count.mjs && tsc -p test/types/tsconfig.json",
+    "build:plugin": "node dist/tool-package.js",
+    "prepack": "npm run build"
+  },
+  "optionalDependencies": {
+    "esbuild": "0.25.12",
+    "typescript": "5.9.3"
+  },
+  "devDependencies": {
+    "@types/node": "26.6.5",
+    "tsx": "4.23.15"
+  }
+}

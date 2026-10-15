@@ -1,0 +1,8 @@
+node_modules/
+dist/
+work/
+*.tgz
+examples/**/*.mjs
+examples/**/*.d.mts
+examples/**/*.types/
+examples/stored-assets/rust.asset.ts
