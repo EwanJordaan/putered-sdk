@@ -33,10 +33,6 @@
       "types": "./dist/tool-artifact.d.ts",
       "import": "./dist/tool-artifact.js"
     },
-    "./contracts": {
-      "types": "./dist/server-contracts.d.ts",
-      "import": "./dist/server-contracts.js"
-    },
     "./build": {
       "types": "./dist/tool-package.d.ts",
       "import": "./dist/tool-package.js"
@@ -53,7 +49,6 @@
   },
   "scripts": {
     "build": "tsc",
-    "prepare": "npm run build",
     "test": "npm run build && npm run test:types && node --test test/*.test.mjs",
     "test:types": "npm run build:plugin -- examples/typed-tools/word-count.ts examples/typed-tools/word-count.mjs && tsc -p test/types/tsconfig.json",
     "build:plugin": "node dist/tool-package.js",
