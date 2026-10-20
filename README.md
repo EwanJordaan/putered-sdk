@@ -17,7 +17,7 @@ cd putered-sdk
 npm ci
 npm run build
 npm pack
-# In your application: npm install /path/to/putered-sdk-0.1.0.tgz
+# In your application: npm install /path/to/putered-sdk-0.1.2.tgz
 ```
 
 Normal installs include the optional esbuild/TypeScript plugin builder.
@@ -45,6 +45,11 @@ servers can return their usual result immediately. Cancelling result collection
 does not cancel the server command. Collection errors include the execution ID
 for inspection and never automatically replay the command. Polling is bounded
 to 30 minutes. See [response contracts](docs/sdk-response-contracts.md).
+
+Stdout and stderr are fields of that one result, never separate retrieval APIs.
+Use `await environment.delete()` to permanently remove an idle environment and
+its saved workspace data (requires server v0.1.2). Shared tool assets and separately
+captured presets remain.
 
 ## Define your own plugin
 

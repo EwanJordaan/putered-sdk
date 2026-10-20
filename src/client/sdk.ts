@@ -107,6 +107,12 @@ export class Environment {
   capturePreset(options: CapturePresetOptions) {
     return capturePreset(this.transport, this.id, options);
   }
+  /** Permanently delete this environment and its stored workspace data. */
+  async delete(options: { signal?: AbortSignal } = {}): Promise<{ id: string; deleted: true }> {
+    const result = await this.transport.request(`/environments/${this.id}`, "DELETE",
+      z.object({ id: z.literal(this.id), deleted: z.literal(true) }), undefined, options.signal);
+    return result;
+  }
   /** Stored settings from create/connect; no request or live health check. */
   describe(): DeepReadonly<EnvironmentRecord> { return freezeRecord(structuredClone(this.record)); }
   async exec(command: string, options: ExecOptions = {}): Promise<ExecResult> {

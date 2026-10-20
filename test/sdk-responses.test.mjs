@@ -19,6 +19,20 @@ const execution = { stdout: 'ok', stdoutBase64: 'b2s=', stderr: '', exitCode: 0,
 const protocol = error => error.code === 'PROTOCOL_ERROR';
 const client = fetcher => new Putered({ baseUrl: 'https://putered.invalid', apiKey: 'x'.repeat(32), config: {}, fetch: fetcher });
 const reply = value => Response.json(value);
+
+test('environment deletion requires an exact identity and explicit acknowledgement in one DELETE response', async () => {
+  for (const value of [{ id: record.id, deleted: true }, { id: 'env_other', deleted: true }, { id: record.id, deleted: false }, { id: record.id }]) {
+    let deletes = 0;
+    const sdk = client(async (_url, options) => {
+      if (options.method === 'DELETE') { deletes++; return reply(value); }
+      return reply(record);
+    });
+    const env = await sdk.environments.connect(record.id);
+    if (value.id === record.id && value.deleted === true) assert.deepEqual(await env.delete(), value);
+    else await assert.rejects(env.delete(), protocol);
+    assert.equal(deletes, 1);
+  }
+});
 async function directory(t) { const path = await mkdtemp(join(tmpdir(), 'putered-response-')); t.after(() => rm(path, { recursive: true, force: true })); return path; }
 function preset(bytes, overrides = {}) {
   const value = { name: 'image', format: 'oci', state: 'ready', visibility: 'private', platform: { os: 'linux', architecture: 'amd64' },

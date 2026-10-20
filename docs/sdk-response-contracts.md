@@ -1,6 +1,6 @@
 # SDK response contracts
 
-This audit covers all 17 public client operations and every HTTP response consumed
+This audit covers all 18 public client operations and every HTTP response consumed
 by `src/client/`. Request and stored-record schemas remain strict. Client response
 schemas live in `src/client/responses.ts`: harmless extra envelope metadata is
 discarded, while required values, policy, manifests and identity are checked.
@@ -23,6 +23,7 @@ or a nonzero process exit are valid results.
 | `environments.connect()` | `GET /v1/environments/{id}` → environment | Shape, matching ID and SDK network policy. |
 | `environment.describe()` | Validated cached record → frozen copy | No network read; uses the record validated by create/connect. |
 | `environment.exec()` | `POST /v1/environments/{id}/exec` → execution result | Required outputs/status/timings; canonical base64, decoded text agreement and byte bound; nonnegative timings/counters and optional metrics. Nonzero process exits are valid results. |
+| `environment.delete()` | `DELETE /v1/environments/{id}` → `{id,deleted:true}` | Exact requested environment identity and confirmed deletion acknowledgement. |
 | `environment.tools.call()` | `POST /v1/environments/{id}/tools/call` → `{output}` | Required output, bounded JSON and the tool's declared output schema; not merely its envelope. |
 | `environment.capturePreset()` | `POST /v1/environments/{id}/preset` → preset | Preset identity, name, source, originating environment and capture scope. |
 | `assets.get()` | `GET /v1/assets/{id}` → asset reference | Reference shape, requested ID; returned reference/entrypoints are frozen. |

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { Putered } from '../dist/client/sdk.js';
 
 const id = 'env_test', jobId = '6ab8dedc-1c8b-4eed-ae76-c0a9a462bb11';
-const result = { stdout: 'hello', stdoutBase64: 'aGVsbG8=', stderr: '', exitCode: 0, durationMs: 125000, hostDurationMs: 126000 };
+const result = { stdout: 'hello', stdoutBase64: 'aGVsbG8=', stderr: 'warning\n', exitCode: 0, durationMs: 125000, hostDurationMs: 126000 };
 const completed = { id: jobId, environmentId: id, state: 'completed', httpStatus: 200, result };
 async function fixture(reply) {
   const requests = [];
