@@ -24,6 +24,28 @@ Normal installs include the optional esbuild/TypeScript plugin builder.
 Applications consuming prebuilt plugins can use `npm install --omit=optional`.
 Runtime client imports do not load build tooling or any server dependencies.
 
+## Command output and long public API requests
+
+```ts
+const result = await environment.exec('git clone --depth 1 https://github.com/nestjs/nest.git', {
+  timeoutMs: 60000,
+  async: true,
+});
+process.stdout.write(result.stdout);
+process.stderr.write(result.stderr);
+if (result.exitCode !== 0) throw new Error(`Command exited ${result.exitCode}`);
+```
+
+Empty stdout is valid. Git progress and errors normally appear on stderr; a
+nonzero process exit is returned as a result and must be checked by your program.
+`async: true` uses the public account API's saved execution results to avoid long
+synchronous HTTP responses while workspace changes are persisted. The command
+is submitted once, then polled. The default remains synchronous; ordinary direct
+servers can return their usual result immediately. Cancelling result collection
+does not cancel the server command. Collection errors include the execution ID
+for inspection and never automatically replay the command. Polling is bounded
+to 30 minutes. See [response contracts](docs/sdk-response-contracts.md).
+
 ## Define your own plugin
 
 ```ts

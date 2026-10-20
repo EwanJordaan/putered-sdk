@@ -73,6 +73,8 @@ export async function uploadFiles(manifest: AssetManifest, paths: Map<string, st
           read += result.bytesRead;
         }
         upload = await part(file, offset, bytes);
+        if (upload.offsets[file.sha256] < offset + bytes.length)
+          throw new PuteredError("Upload acknowledgement did not advance; the part was not retried.", "PROTOCOL_ERROR");
       }
     } finally { await handle.close(); }
   }

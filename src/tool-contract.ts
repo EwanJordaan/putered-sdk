@@ -2,6 +2,8 @@ import { z } from "zod";
 import { createHash } from "node:crypto";
 import { canonical, validName } from "./tool-definition.js";
 import { assetReferenceSchema } from "./asset-contract.js";
+import { presetIdSchema, presetSaveScopeSchema } from "./preset-contract.js";
+import { internetPolicySchema } from "./network-policy.js";
 
 const name = z.string().refine(validName);
 const schema = z.record(z.string(), z.unknown());
@@ -32,19 +34,24 @@ export const storedToolSchema = z.strictObject({
 export type StoredTool = z.infer<typeof storedToolSchema>;
 export const toolOptionsSchema = z.strictObject({ visibility: z.literal("private").optional() });
 export const environmentSettingsSchema = z.strictObject({
+  saveScope: presetSaveScopeSchema.optional(),
   git: z.boolean().optional(),
   execution: z.strictObject({ mode: z.enum(["auto", "isolate-only", "native-only"]) }).optional(),
-  network: z.strictObject({ mode: z.literal("disabled") }).optional(),
+  network: z.discriminatedUnion("mode", [
+    z.strictObject({ mode: z.literal("disabled") }),
+    internetPolicySchema,
+  ]).optional(),
   timeoutMs: z.number().int().min(1).max(300000).optional(),
 });
 export const environmentSchema = z.strictObject({
   id: z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$/),
   tools: z.array(toolIdSchema).max(64),
   settings: environmentSettingsSchema,
+  template: presetIdSchema.optional(),
 });
 export type EnvironmentRecord = z.infer<typeof environmentSchema>;
 export const createEnvironmentSchema = z.strictObject({
-  template: z.literal("general").optional(),
+  template: z.union([z.literal("general"), presetIdSchema]).optional(),
   tools: z.array(toolIdSchema).max(64).optional(),
   settings: environmentSettingsSchema.optional(),
 });
