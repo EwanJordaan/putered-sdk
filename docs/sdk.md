@@ -42,7 +42,8 @@ methods; see [non-root identity and host requirements](nonroot.md).
 
 `exec()` returns separate `stdout`, `stderr`, and `exitCode` fields. Empty stdout is
 valid: Git progress and errors normally appear on stderr. A nonzero process exit
-is a result; call `output()` to throw on failure, or inspect `exitCode` directly.
+throws `CommandError` by default. Set `check: false` to inspect nonzero exits as results.
+The `output` string property combines stdout followed by stderr.
 
 Both streams are always returned together by the same execution API, for example:
 `{ "stdout": "hello\n", "stderr": "warning\n", "exitCode": 0, "durationMs": 12 }`.
@@ -58,7 +59,6 @@ const result = await environment.exec('git clone --depth 1 https://github.com/ne
 });
 process.stdout.write(result.stdout);
 process.stderr.write(result.stderr);
-if (result.exitCode !== 0) throw new Error(`Command exited ${result.exitCode}`);
 ```
 
 For combined text with automatic failure handling:
@@ -68,20 +68,21 @@ import { CommandError } from '@putered/sdk';
 
 try {
   const command = await environment.exec('npm run build', { async: true });
-  console.log(await command.output());
+  console.log(command.output);
 } catch (error) {
   if (!(error instanceof CommandError)) throw error; // API/network errors
   console.error(error.output, error.exitCode);
 }
 ```
 
-`output()` defaults to `"both"`; `output("stdout")` and `output("stderr")` select
-one stream. Each throws `CommandError` for a nonzero exit. The error includes
+`output` is a string property, not a method. A nonzero exit rejects `exec()` with
+`CommandError`. The error includes
 `output`, `stdout`, `stderr`, `exitCode`, and the full `result`. Combined text is
 stdout followed by stderr, with no added separator; it does not reconstruct
-chronological ordering. These helpers read the collected response locally and
-never run or poll a command again. Existing result fields and non-throwing
-`exec()` exit-code handling remain compatible.
+chronological ordering. Reading it never makes a request or runs a command.
+For commands where a nonzero exit is expected (such as `grep` with no matches),
+use `await environment.exec(command, { check: false })` and inspect `exitCode`.
+The server response format is unchanged; `output` is added locally by the SDK.
 
 For the public account API, `async: true` submits once and polls a saved result,
 avoiding a long synchronous HTTP response while workspace changes are persisted.

@@ -3,7 +3,6 @@ import type { z } from "zod";
 import type { execResultSchema } from "./responses.js";
 
 export type ExecutionData = z.infer<typeof execResultSchema>;
-export type OutputStream = "both" | "stdout" | "stderr";
 
 /** A completed command failed. Both original streams remain available. */
 export class CommandError extends PuteredError {
@@ -11,8 +10,8 @@ export class CommandError extends PuteredError {
   readonly stdout: string;
   readonly stderr: string;
   readonly exitCode: number;
-  readonly result: ExecutionData;
-  constructor(result: ExecutionData) {
+  readonly result: CommandResult;
+  constructor(result: CommandResult) {
     super(`Command exited with code ${result.exitCode}.`, "EXECUTION_FAILED");
     this.name = "CommandError";
     this.output = result.stdout + result.stderr;
@@ -24,18 +23,15 @@ export class CommandError extends PuteredError {
 }
 
 export interface CommandResult extends ExecutionData {
-  /** Read collected text without another request. Throws CommandError on nonzero exit. */
-  output(stream?: OutputStream): Promise<string>;
+  /** Collected stdout followed by stderr; no extra request or chronological ordering. */
+  readonly output: string;
 }
 
-export function commandResult(result: ExecutionData): CommandResult {
-  return Object.defineProperty(result, "output", {
+export function commandResult(result: ExecutionData, check = true): CommandResult {
+  const command = Object.defineProperty(result, "output", {
     enumerable: false,
-    async value(stream: OutputStream = "both") {
-      if (!["both", "stdout", "stderr"].includes(stream))
-        throw new PuteredError("Output stream must be both, stdout or stderr.", "INVALID_INPUT");
-      if (result.exitCode !== 0) throw new CommandError(result);
-      return stream === "both" ? result.stdout + result.stderr : result[stream];
-    },
+    value: result.stdout + result.stderr,
   }) as CommandResult;
+  if (check && command.exitCode !== 0) throw new CommandError(command);
+  return command;
 }

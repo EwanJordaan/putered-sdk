@@ -62,7 +62,7 @@ test('environment create/connect/describe accept additive metadata and reject wr
 test('execution validates every required field, byte/text agreement and optional metrics; nonzero exit is a result', async () => {
   async function exec(value) {
     const sdk = client(async url => reply(String(url).endsWith('/exec') ? value : record));
-    return (await sdk.environments.create()).exec('echo ok');
+    return (await sdk.environments.create()).exec('echo ok',{check:false});
   }
   for (const field of Object.keys(execution)) {
     const bad = { ...execution }; delete bad[field]; await assert.rejects(exec(bad), protocol);

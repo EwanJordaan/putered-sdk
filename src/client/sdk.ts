@@ -7,7 +7,6 @@ import { Transport } from "./transport.js";
 import { asyncExecution } from "./execution.js";
 import { commandResult, type CommandResult } from "./command-output.js";
 export { CommandError } from "./command-output.js";
-export type { OutputStream } from "./command-output.js";
 import { Assets } from "./assets.js";
 import { Presets, capturePreset, type CapturePresetOptions } from "./presets.js";
 import { PuteredError } from "../errors.js";
@@ -38,7 +37,7 @@ export interface ToolReference<T extends ToolMap | null = null> {
 }
 export interface ToolUseOptions { visibility?: "private" }
 export interface CallOptions { wait?: true; timeoutMs?: number; signal?: AbortSignal }
-export interface ExecOptions extends CallOptions { async?: boolean }
+export interface ExecOptions extends CallOptions { async?: boolean; check?: boolean }
 export interface ExecResult extends CommandResult {}
 
 export class Tools {
@@ -123,6 +122,8 @@ export class Environment {
       throw new PuteredError("Command must be nonempty and no larger than 64 KiB.", "INVALID_INPUT");
     if (options.async !== undefined && typeof options.async !== "boolean")
       throw new PuteredError("async must be a boolean.", "INVALID_INPUT");
+    if (options.check !== undefined && typeof options.check !== "boolean")
+      throw new PuteredError("check must be a boolean.", "INVALID_INPUT");
     const input = {
       command,
       ...inputContract(callOptionsSchema, { ...(options.wait === undefined ? {} : { wait: options.wait }),
@@ -131,7 +132,7 @@ export class Environment {
     const result = options.async
       ? await asyncExecution(this.transport, this.id, input, options.signal)
       : await this.transport.request(`/environments/${this.id}/exec`, "POST", execResultSchema, input, options.signal);
-    return commandResult(result);
+    return commandResult(result, options.check ?? true);
   }
 }
 export interface EnvironmentOptions {

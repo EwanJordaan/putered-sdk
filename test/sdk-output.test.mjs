@@ -17,17 +17,16 @@ test('output reads collected sync/async results and preserves the existing seria
     const env=await sdk.environments.connect(environment.id);
     const command=await env.exec('echo hello',{async:asynchronous});
     const before=calls;
-    assert.equal(await command.output(),'hello\nwarning\n');
-    assert.equal(await command.output('stdout'),'hello\n');
-    assert.equal(await command.output('stderr'),'warning\n');
+    assert.equal(command.output,'hello\nwarning\n');
+    assert.equal(typeof command.output,'string');
     assert.equal(calls,before);
     assert.deepEqual(command,data);
     assert.deepEqual(JSON.parse(JSON.stringify(command)),data);
-    await assert.rejects(command.output('invalid'),error=>error.code==='INVALID_INPUT');
+    await assert.rejects(env.exec('echo hello',{check:'invalid'}),error=>error.code==='INVALID_INPUT');
   }
 });
 
-test('nonzero commands throw only on output(), preserving both streams and complete result',async()=>{
+test('nonzero commands reject exec with output and permit explicit unchecked results',async()=>{
   for(const asynchronous of [false,true]){
     const failed={...data,exitCode:2,stdout:'',stdoutBase64:'',stderr:'build failed\n'};
     const sdk=new Putered({baseUrl:'https://putered.invalid',apiKey:'x'.repeat(32),config:{},fetch:async(url,options)=>{
@@ -35,13 +34,14 @@ test('nonzero commands throw only on output(), preserving both streams and compl
       return Response.json(options.method==='POST'?(asynchronous?{jobId,state:'running'}:failed):environment);
     }});
     const env=await sdk.environments.connect(environment.id);
-    const command=await env.exec('exit 2',{async:asynchronous});
-    for(const stream of ['both','stdout','stderr'])await assert.rejects(command.output(stream),error=>{
+    await assert.rejects(env.exec('exit 2',{async:asynchronous}),error=>{
       assert.ok(error instanceof CommandError && error instanceof PuteredError);
       assert.equal(error.output,'build failed\n');assert.equal(error.exitCode,2);
       assert.equal(error.stdout,'');assert.equal(error.stderr,'build failed\n');
-      assert.equal(error.result,command);assert.equal(error.code,'EXECUTION_FAILED');
+      assert.equal(error.result.output,error.output);assert.equal(error.code,'EXECUTION_FAILED');
       return true;
     });
+    const command=await env.exec('exit 2',{async:asynchronous,check:false});
+    assert.equal(command.output,'build failed\n');assert.equal(command.exitCode,2);
   }
 });
