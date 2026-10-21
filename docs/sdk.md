@@ -1,9 +1,95 @@
 # Typed SDK tools and automatic reuse
 
+For normal work, create or reconnect to one environment and send a shell string:
+
+```ts
+const environment = await putered.environments.create();
+console.log((await environment.exec('pwd')).stdout);
+// Later: await putered.environments.connect(environment.id)
+```
+
+Files persist between requests. Git HTTPS, downloads and dependency installs work
+by default. To opt out, put `{"network":{"mode":"disabled"}}` in
+`putered.sdk.config.json` in your client’s working directory; see
+[SDK config and limits](internet.md#sdk-config-opt-out). `environment.describe()`
+returns the settings received at create/connect without another request. Use
+`putered environments exec <id> -- 'command'` to print program output directly;
+`--json` includes the structured result and optional network usage.
+
+Delete an environment permanently with `await environment.delete()`. This removes
+its saved workspace data and local environment state. Active executions must finish
+first. Captured presets and shared tool assets are separate resources and remain.
+Deletion requires local-disk mode or durable workspace storage; metadata-only
+registry deployments cannot safely coordinate deletion across workers.
+
 The separate `@putered/sdk` package exports `Putered` and provides
-`definePlugin`/`defineTool` through `@putered/sdk/plugins`. The server is maintained separately in
-[EwanJordaan/Putered](https://github.com/EwanJordaan/Putered). The npm package is
-not published yet; see [installation](../README.md#install-from-this-repository).
+`definePlugin`/`defineTool` through `@putered/sdk/plugins`. Server implementations
+live under `src/server` and are exported through `putered/server`. Packages are
+not published to a public registry yet; see [package installation and stored binaries](assets.md).
+Legacy `putered` / `putered/plugins` imports remain compatible.
+
+OCI preset upload, listing, inspection and verified streaming download are exposed
+through `putered.presets`; `environment.capturePreset({ name })` saves the entire
+OCI environment by default. Set the environment’s `settings.saveScope: "workspace-only"` at creation to save only workspace
+files and restore them into a fresh standard environment with less storage.
+The creation-time choice is fixed; omitting it defaults to the entire environment.
+The CLI provides matching `putered presets` commands.
+See [preset SDK/CLI examples and scope compatibility](presets.md#sdk-and-cli).
+OCI image users and full-snapshot ownership preservation work through these same
+methods; see [non-root identity and host requirements](nonroot.md).
+
+## Command output and long public API requests
+
+`exec()` returns separate `stdout`, `stderr`, and `exitCode` fields. Empty stdout is
+valid: Git progress and errors normally appear on stderr. A nonzero process exit
+is a result; call `output()` to throw on failure, or inspect `exitCode` directly.
+
+Both streams are always returned together by the same execution API, for example:
+`{ "stdout": "hello\n", "stderr": "warning\n", "exitCode": 0, "durationMs": 12 }`.
+Synchronous responses contain this object directly; asynchronous polling carries
+the same object in `result`, and the SDK unwraps it before returning. There are
+no extra requests to retrieve either stream. The fields preserve which stream produced text;
+they do not claim to preserve ordering between separate operating-system pipes.
+
+```ts
+const result = await environment.exec('git clone --depth 1 https://github.com/nestjs/nest.git', {
+  timeoutMs: 60000,
+  async: true,
+});
+process.stdout.write(result.stdout);
+process.stderr.write(result.stderr);
+if (result.exitCode !== 0) throw new Error(`Command exited ${result.exitCode}`);
+```
+
+For combined text with automatic failure handling:
+
+```ts
+import { CommandError } from '@putered/sdk';
+
+try {
+  const command = await environment.exec('npm run build', { async: true });
+  console.log(await command.output());
+} catch (error) {
+  if (!(error instanceof CommandError)) throw error; // API/network errors
+  console.error(error.output, error.exitCode);
+}
+```
+
+`output()` defaults to `"both"`; `output("stdout")` and `output("stderr")` select
+one stream. Each throws `CommandError` for a nonzero exit. The error includes
+`output`, `stdout`, `stderr`, `exitCode`, and the full `result`. Combined text is
+stdout followed by stderr, with no added separator; it does not reconstruct
+chronological ordering. These helpers read the collected response locally and
+never run or poll a command again. Existing result fields and non-throwing
+`exec()` exit-code handling remain compatible.
+
+For the public account API, `async: true` submits once and polls a saved result,
+avoiding a long synchronous HTTP response while workspace changes are persisted.
+It returns the same validated result. Ordinary direct servers may return their
+normal result immediately. The default remains synchronous. Polling stops after
+30 minutes or when `signal` aborts; stopping polling does not cancel the server
+command. Collection errors include the execution ID so it can be inspected;
+the SDK never replays execution after an error or unknown outcome.
 
 ## Define and build a plugin
 
@@ -55,16 +141,16 @@ otherwise bundled. Native addons and system libraries are not provisioned by thi
 build helper. V8 packages reject external builtin imports. Their handler APIs are
 restricted further at execution time.
 
-Build tooling is isolated behind `@putered/sdk/build`, which exports `buildPlugin`.
+Build tooling is isolated behind `putered/build`, which exports `buildPlugin`.
 The runtime SDK (`@putered/sdk`), definitions (`@putered/sdk/plugins`) and artifact
 helper (`@putered/sdk/packaging`) do not import esbuild or TypeScript. Those packages are optional
 dependencies: install them on build machines; runtime installations can use
 `npm install --omit=optional` when consuming prebuilt plugins or saved IDs.
 The standalone SDK has no server, shell, Python, PostgreSQL or S3 dependencies.
-The server has its own dependencies in its separate repository.
+The root development/server package still includes those server dependencies.
 
 ```ts
-import { buildPlugin } from '@putered/sdk/build';
+import { buildPlugin } from 'putered/build';
 await buildPlugin('./plugin.ts', './plugin.mjs');
 ```
 
@@ -163,7 +249,8 @@ cross-process registry locks; see [storage configuration](assets.md#storage-and-
 
 The SDK implements `environments.create`, `environments.connect`, `environment.exec`
 and `environment.tools.call`. `general` is the supported template. Settings include
-optional Git (off by default), execution mode, disabled networking and timeouts.
+optional Git (off by default), execution mode, network access (enabled for new environments by default)
+and timeouts. See [internet access](internet.md) for the worker capability and limits.
 There is no idle VM to suspend: tool processes end after each call, while shared
 runtime caches may remain warm. Files persist. Calls currently wait for completion;
 `wait: false` is rejected instead of returning a fake streaming handle. Client
@@ -182,14 +269,19 @@ process rather than delivering live IPC abort events to the handler.
 and all native/legacy-plugin dispatch from shell requests, including nested dynamic
 commands. Virtual file/text builtins and Wasm Git remain available. Python shell
 dispatch is also denied in this first strict mode; integrating approved Pyodide
-bindings is future work. `native-only` accepts native tools but rejects complete
-Bash execution because a native Bash route is not implemented. An environment
+bindings is future work. `native-only` accepts native tools and runs complete
+scripts in native Bash. Internet-enabled `auto` environments also use native Bash;
+offline `auto` environments retain the virtual shell. An environment
 can call only its attached tool IDs. Complete scripts otherwise use the existing
 virtual shell and supported Node/Python backends; trusted host/HTTP command plugins
 are not dispatched from these hosted environment scripts.
 
-Guest networking is disabled. Stored tools and environment execution explicitly
-reject a host configured with shared networking; `PUTERED_NODE_NETWORK` must be
+New environments default to public HTTP(S) through an isolated proxy. SDK config
+can disable internet for all tools, including Git. Existing offline environments
+stay offline; operators can disable internet worker-wide with `PUTERED_INTERNET=0`.
+See [internet access](internet.md).
+Stored tools and environment execution still reject a host configured with
+shared networking; `PUTERED_NODE_NETWORK` must be
 unset or `0`. Backend selection happens before invoking a handler, and failures
 are never retried on another backend. Tool console logs go to stderr so they do
 not corrupt the JSON result. Direct writes to protocol stdout are unsupported.

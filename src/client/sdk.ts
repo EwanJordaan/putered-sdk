@@ -5,6 +5,9 @@ import { canonical, freezeRecord, jsonValue, type DeepReadonly, type Json, type 
 import { packageOf } from "../tool-artifact.js";
 import { Transport } from "./transport.js";
 import { asyncExecution } from "./execution.js";
+import { commandResult, type CommandResult } from "./command-output.js";
+export { CommandError } from "./command-output.js";
+export type { OutputStream } from "./command-output.js";
 import { Assets } from "./assets.js";
 import { Presets, capturePreset, type CapturePresetOptions } from "./presets.js";
 import { PuteredError } from "../errors.js";
@@ -36,7 +39,7 @@ export interface ToolReference<T extends ToolMap | null = null> {
 export interface ToolUseOptions { visibility?: "private" }
 export interface CallOptions { wait?: true; timeoutMs?: number; signal?: AbortSignal }
 export interface ExecOptions extends CallOptions { async?: boolean }
-export interface ExecResult extends z.infer<typeof execResultSchema> {}
+export interface ExecResult extends CommandResult {}
 
 export class Tools {
   constructor(private readonly transport: Transport) {}
@@ -125,8 +128,10 @@ export class Environment {
       ...inputContract(callOptionsSchema, { ...(options.wait === undefined ? {} : { wait: options.wait }),
         ...(options.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs }) }),
     };
-    if (options.async) return asyncExecution(this.transport, this.id, input, options.signal);
-    return this.transport.request(`/environments/${this.id}/exec`, "POST", execResultSchema, input, options.signal);
+    const result = options.async
+      ? await asyncExecution(this.transport, this.id, input, options.signal)
+      : await this.transport.request(`/environments/${this.id}/exec`, "POST", execResultSchema, input, options.signal);
+    return commandResult(result);
   }
 }
 export interface EnvironmentOptions {
