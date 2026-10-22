@@ -9,6 +9,9 @@ import { commandResult, type CommandResult } from "./command-output.js";
 export { CommandError } from "./command-output.js";
 import { Assets } from "./assets.js";
 import { Presets, capturePreset, type CapturePresetOptions } from "./presets.js";
+import { EnvironmentTerminals } from './terminals.js';
+export { TerminalSession } from './terminals.js';
+export type { TerminalState } from './terminals.js';
 import { PuteredError } from "../errors.js";
 export { PuteredError, ERROR_CODES } from "../errors.js";
 export type { ErrorCode } from "../errors.js";
@@ -100,10 +103,12 @@ class EnvironmentTools {
 }
 
 export class Environment {
+  readonly terminals:EnvironmentTerminals;
   readonly tools: EnvironmentTools;
   readonly id: string;
   constructor(private readonly transport: Transport, private readonly record: EnvironmentRecord) {
     this.id = record.id;
+    this.terminals=new EnvironmentTerminals(transport,record.id);
     this.tools = new EnvironmentTools(transport, record);
   }
   capturePreset(options: CapturePresetOptions) {

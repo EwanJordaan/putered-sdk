@@ -2,7 +2,7 @@ import { z } from "zod";
 import { constants } from "node:fs";
 import { open, lstat, link, mkdtemp, rm } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { Readable } from "node:stream";
 import { capturePresetSchema, captureScope, presetIdSchema, presetNameSchema,
   PRESET_MAX_BYTES, type Preset } from "../preset-contract.js";
@@ -12,7 +12,7 @@ import type { Transport } from "./transport.js";
 import { presetResponseSchema } from "./responses.js";
 
 const archiveType = "application/vnd.oci.image.layout.v1+tar";
-export interface PresetRequestOptions { signal?: AbortSignal }
+export interface PresetRequestOptions { signal?: AbortSignal; onOperation?: (id: string) => void }
 export interface PresetTransferOptions extends PresetRequestOptions {
   onProgress?: (progress: { completedBytes: number; totalBytes: number }) => void;
 }
@@ -36,15 +36,35 @@ function pathInput(path: string) {
     throw new PuteredError("Supply a nonempty file path.", "INVALID_INPUT");
   return resolve(path);
 }
+const operationSchema=z.object({id:z.string().uuid(),state:z.enum(['prepared','uploading','running','ready','failed','unknown','cancelled']),result:presetResponseSchema.optional(),error:z.string().optional()});
+async function waitOperation(transport:Transport,id:string,signal?:AbortSignal):Promise<Preset>{
+  const deadline=Date.now()+20*60000;
+  while(Date.now()<deadline){
+    cancelled(signal);
+    const operation=await transport.request('/preset-operations/'+id,'GET',operationSchema,undefined,signal);
+    if(operation.id!==id)throw new PuteredError('Operation ID mismatch.','PROTOCOL_ERROR');
+    if(operation.state==='ready'){if(!operation.result)throw new PuteredError('Missing ready image.','PROTOCOL_ERROR');return operation.result;}
+    if(['failed','unknown','cancelled'].includes(operation.state))throw new PuteredError((operation.error||'Image operation '+operation.state)+'. Inspect operation '+id+' before retrying.',operation.state==='unknown'?'CONFLICT':'PACKAGE_INVALID');
+    await new Promise<void>((resolve,reject)=>{const done=()=>{signal?.removeEventListener('abort',abort);resolve();},timer=setTimeout(done,1000),abort=()=>{clearTimeout(timer);signal?.removeEventListener('abort',abort);reject(new PuteredError('Cancelled; inspect operation '+id+' before retrying.','CANCELLED'));};signal?.addEventListener('abort',abort,{once:true});if(signal?.aborted)abort();});
+  }
+  throw new PuteredError('Image operation is still pending. Inspect '+id+' before retrying.','TIMEOUT');
+}
 
 export async function capturePreset(transport: Transport, environmentId: string, options: CapturePresetOptions): Promise<Preset> {
   input(environmentSchema.shape.id, environmentId);
-  const { signal, ...value } = options;
+  const { signal, onOperation, ...value } = options;
   const request = input(capturePresetSchema, value), scope = captureScope(request);
   if (scope !== "state" && (request.workspace.length || request.home.length))
     throw new PuteredError("Save scopes do not accept workspace/home selections.", "INVALID_INPUT");
   cancelled(signal);
-  const result = await transport.request(`/environments/${environmentId}/preset`, "POST", presetResponseSchema, {
+  let result:Preset;
+  if(transport.accountApi){
+    if(request.mode==='state')throw new PuteredError('Legacy state captures are not available through account keys.','POLICY_DENIED');
+    const id=randomUUID();onOperation?.(id);
+    const operation=await transport.request('/preset-operations','POST',operationSchema,{id,kind:'capture',name:request.name,environmentId},signal);
+    if(operation.id!==id)throw new PuteredError('Operation ID mismatch.','PROTOCOL_ERROR');
+    result=await waitOperation(transport,id,signal);
+  }else result = await transport.request(`/environments/${environmentId}/preset`, "POST", presetResponseSchema, {
     name: request.name, workspace: request.workspace, home: request.home,
     ...(request.mode === undefined ? {} : { mode: request.mode }),
   }, signal);
@@ -57,6 +77,11 @@ export async function capturePreset(transport: Transport, environmentId: string,
 
 export class Presets {
   constructor(private readonly transport: Transport) {}
+  async operation(id:string,options:PresetRequestOptions={}){
+    input(z.string().uuid(),id);cancelled(options.signal);
+    const record=await this.transport.request('/preset-operations/'+id,'GET',operationSchema,undefined,options.signal);
+    if(record.id!==id)throw new PuteredError('Operation ID mismatch.','PROTOCOL_ERROR');return record;
+  }
   async list(options: PresetRequestOptions = {}): Promise<Preset[]> {
     cancelled(options.signal);
     return this.transport.request("/presets", "GET", z.array(presetResponseSchema), undefined, options.signal);
@@ -82,6 +107,24 @@ export class Presets {
       const digest = createHash("sha256"); let completedBytes = 0;
       const progress = () => options.onProgress?.({ completedBytes, totalBytes: stat.size });
       progress();
+      if(this.transport.accountApi){
+        const id=randomUUID();options.onOperation?.(id);
+        const operation=await this.transport.request('/preset-operations','POST',operationSchema,{id,name,kind:'upload',bytes:stat.size},options.signal);
+        if(operation.id!==id||operation.state!=='uploading')throw new PuteredError('Invalid upload operation.','PROTOCOL_ERROR');
+        while(completedBytes<stat.size){
+          cancelled(options.signal);
+          const bytes=Buffer.allocUnsafe(Math.min(8*1024*1024,stat.size-completedBytes));let read=0;
+          while(read<bytes.length){const next=await file.read(bytes,read,bytes.length-read,completedBytes+read);if(!next.bytesRead)throw new PuteredError('Archive changed during upload.','INVALID_INPUT');read+=next.bytesRead;}
+          const index=Math.floor(completedBytes/(8*1024*1024)),hash=createHash('sha256').update(bytes).digest('hex');
+          const part=await this.transport.request('/preset-operations/'+id+'/parts/'+index,'PUT',z.object({index:z.literal(index),bytes:z.literal(bytes.length),sha256:z.literal(hash)}),undefined,options.signal,bytes);
+          digest.update(bytes);completedBytes+=part.bytes;progress();
+        }
+        const completed=await this.transport.request('/preset-operations/'+id+'/complete','POST',operationSchema,{},options.signal);
+        if(completed.id!==id)throw new PuteredError('Operation ID mismatch.','PROTOCOL_ERROR');
+        const result=await waitOperation(this.transport,id,options.signal);
+        if(result.archiveSha256!==digest.digest('hex')||result.bytes!==stat.size||result.name!==name||result.source!=='upload')throw new PuteredError('Uploaded image mismatch.','PROTOCOL_ERROR');
+        return result;
+      }
       stream = Readable.from((async function* () {
         while (completedBytes < stat.size) {
           cancelled(options.signal);

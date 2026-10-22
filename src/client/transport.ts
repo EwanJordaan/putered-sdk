@@ -3,6 +3,7 @@ import { encodeJson } from "../json.js";
 import { ERROR_CODES, PuteredError, codeForStatus } from "../errors.js";
 import { MAX_BYTES } from "../limits.js";
 export class Transport {
+  get accountApi() { return this.apiKey.startsWith('pk_live_'); }
   constructor(private readonly baseUrl: string, private readonly apiKey: string,
     private readonly fetcher: typeof fetch) {}
   async request<S extends z.ZodType>(path: string, method: string, schema: S,

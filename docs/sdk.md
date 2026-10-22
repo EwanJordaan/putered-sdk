@@ -35,6 +35,29 @@ files and restore them into a fresh standard environment with less storage.
 The creation-time choice is fixed; omitting it defaults to the entire environment.
 The CLI provides matching `putered presets` commands.
 See [preset SDK/CLI examples and scope compatibility](presets.md#sdk-and-cli).
+
+Interactive shells use the same environment and workspace:
+
+```ts
+const terminal = await environment.terminals.start({ columns: 100, rows: 30 });
+// Poll read() until state === 'running' before sending input.
+const state = await terminal.read({ cursor: 0 });
+process.stdout.write(state.outputBytes);
+await terminal.write('pwd\n');
+await terminal.resize(120, 40);
+await terminal.stop(); // Ends compute and waits for the durable workspace save.
+```
+
+Keep the returned `cursor` for the next read. Reads maintain the connection;
+five-minute sessions stop after two minutes without input or 45 seconds without
+a reader. CPU/RAM are charged while allocated, including an idle shell. Full OS
+configuration requires an OCI environment and an Entire environment snapshot.
+`environment.terminals.connect(id)` reconnects to an existing owned session.
+
+Personal account keys use resumable image operations automatically when calling
+`presets.upload()` or `environment.capturePreset()`. Pass `onOperation(id)` to
+retain the operation ID; `presets.operation(id)` inspects an uncertain result.
+Transfers and captures are never blindly replayed after a dropped response.
 OCI image users and full-snapshot ownership preservation work through these same
 methods; see [non-root identity and host requirements](nonroot.md).
 
