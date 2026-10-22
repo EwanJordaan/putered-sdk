@@ -1,0 +1,12 @@
+{
+  "name": "putered-sdk-examples",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=22.13" },
+  "scripts": {
+    "example": "tsx",
+    "check": "tsc --noEmit"
+  },
+  "dependencies": { "@putered/sdk": "github:EwanJordaan/putered-sdk" },
+  "devDependencies": { "@types/node": "26.6.5", "tsx": "4.23.15", "typescript": "6.0.3" }
+}

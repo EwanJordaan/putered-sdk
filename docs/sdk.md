@@ -1,17 +1,21 @@
-# Typed SDK tools and automatic reuse
+# TypeScript SDK
+
+Start with the [runnable examples](../examples/sdk/README.md). The
+[HTTP API contract](api-contract.md) defines request bodies, response fields,
+authentication, and errors for clients that call the server directly.
 
 For normal work, create or reconnect to one environment and send a shell string:
 
 ```ts
 const environment = await putered.environments.create();
-console.log((await environment.exec('pwd')).stdout);
+console.log((await environment.exec('pwd')).output);
 // Later: await putered.environments.connect(environment.id)
 ```
 
 Files persist between requests. Git HTTPS, downloads and dependency installs work
 by default. To opt out, put `{"network":{"mode":"disabled"}}` in
 `putered.sdk.config.json` in your client’s working directory; see
-[SDK config and limits](internet.md#sdk-config-opt-out). `environment.describe()`
+[SDK config and limits](https://github.com/EwanJordaan/Putered/blob/main/docs/internet.md#sdk-config-opt-out). `environment.describe()`
 returns the settings received at create/connect without another request. Use
 `putered environments exec <id> -- 'command'` to print program output directly;
 `--json` includes the structured result and optional network usage.
@@ -34,7 +38,7 @@ OCI environment by default. Set the environment’s `settings.saveScope: "worksp
 files and restore them into a fresh standard environment with less storage.
 The creation-time choice is fixed; omitting it defaults to the entire environment.
 The CLI provides matching `putered presets` commands.
-See [preset SDK/CLI examples and scope compatibility](presets.md#sdk-and-cli).
+See [preset SDK/CLI examples and scope compatibility](https://github.com/EwanJordaan/Putered/blob/main/docs/presets.md#sdk-and-cli).
 
 Interactive shells use the same environment and workspace:
 
@@ -49,7 +53,7 @@ await terminal.stop(); // Ends compute and waits for the durable workspace save.
 ```
 
 Keep the returned `cursor` for the next read. Reads maintain the connection;
-five-minute sessions stop after two minutes without input or 45 seconds without
+one-hour sessions stop after five minutes without input or 45 seconds without
 a reader. CPU/RAM are charged while allocated, including an idle shell. Full OS
 configuration requires an OCI environment and an Entire environment snapshot.
 `environment.terminals.connect(id)` reconnects to an existing owned session.
@@ -59,7 +63,7 @@ Personal account keys use resumable image operations automatically when calling
 retain the operation ID; `presets.operation(id)` inspects an uncertain result.
 Transfers and captures are never blindly replayed after a dropped response.
 OCI image users and full-snapshot ownership preservation work through these same
-methods; see [non-root identity and host requirements](nonroot.md).
+methods; see [non-root identity and host requirements](https://github.com/EwanJordaan/Putered/blob/main/docs/nonroot.md).
 
 ## Command output and long public API requests
 
@@ -274,7 +278,7 @@ cross-process registry locks; see [storage configuration](assets.md#storage-and-
 The SDK implements `environments.create`, `environments.connect`, `environment.exec`
 and `environment.tools.call`. `general` is the supported template. Settings include
 optional Git (off by default), execution mode, network access (enabled for new environments by default)
-and timeouts. See [internet access](internet.md) for the worker capability and limits.
+and timeouts. See [internet access](https://github.com/EwanJordaan/Putered/blob/main/docs/internet.md) for the worker capability and limits.
 There is no idle VM to suspend: tool processes end after each call, while shared
 runtime caches may remain warm. Files persist. Calls currently wait for completion;
 `wait: false` is rejected instead of returning a fake streaming handle. Client
@@ -303,7 +307,7 @@ are not dispatched from these hosted environment scripts.
 New environments default to public HTTP(S) through an isolated proxy. SDK config
 can disable internet for all tools, including Git. Existing offline environments
 stay offline; operators can disable internet worker-wide with `PUTERED_INTERNET=0`.
-See [internet access](internet.md).
+See [internet access](https://github.com/EwanJordaan/Putered/blob/main/docs/internet.md).
 Stored tools and environment execution still reject a host configured with
 shared networking; `PUTERED_NODE_NETWORK` must be
 unset or `0`. Backend selection happens before invoking a handler, and failures

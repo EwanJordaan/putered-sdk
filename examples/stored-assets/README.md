@@ -1,29 +1,27 @@
-# Compile a Rust program with your uploaded toolchain
+# Build with an uploaded Rust toolchain
 
-This example is useful when a native tool is not preinstalled on the worker. Your
-local source defines the Cargo tool; Putered stores its compiler bytes and reuses
-them. No dashboard account or Putered-maintained Rust plugin is required.
+This example uploads an unpacked Linux Rust toolchain as a stored asset, then
+uses a typed native tool to compile and run a small Rust program inside a
+Putered environment.
 
-1. Build the SDK with `npm ci && npm run build` and start or connect to a
-   [Putered server](https://github.com/EwanJordaan/Putered) with your API key/base URL.
-2. Prepare a regular-file-only, unpacked Linux Rust toolchain with Cargo, rustc,
-   libexec/runtime files and the Rust standard library. Its layout must contain
-   `bin/cargo` and `bin/rustc`; match your worker's architecture/libc. This example
-   uses the worker's `/usr/bin/gcc` linker and needs no external crate downloads.
-3. Set `PUTERED_API_KEY` and `PUTERED_BASE_URL`, then from the repository root:
+Build the repository first with `npm ci && npm run build`. Prepare a
+regular-file-only toolchain for the worker's Linux architecture and libc, with
+`bin/cargo`, `bin/rustc`, runtime files, and the Rust standard library. The
+example links with `/usr/bin/gcc` and builds offline, so its Cargo project needs
+no downloaded crates.
+
+Set `PUTERED_BASE_URL` and `PUTERED_API_KEY`, then upload the toolchain and build
+the plugin from the repository root:
 
 ```sh
-node dist/client/cli.js assets upload /path/to/rust-toolchain \
+node packages/sdk/dist/client/cli.js assets upload /path/to/rust-toolchain \
   --platform linux-x64 --entrypoint cargo=bin/cargo --entrypoint rustc=bin/rustc \
   --output examples/stored-assets/rust.asset.ts
 npm run build:plugin -- examples/stored-assets/cargo.ts examples/stored-assets/cargo.mjs
 npx tsx examples/stored-assets/app.ts
 ```
 
-Commit `rust.asset.ts` and `cargo.ts` in your application. Rebuild after changing
-source or references. Repeated application runs use `tools.use(cargo)` to reuse
-its immutable deployment with inferred input/output types. A future dashboard
-upload will return the same `defineAsset` fields, so the plugin code stays the same.
-
-See [stored assets](../../docs/assets.md) for storage configuration, resumable
-uploads, native dependencies, dashboard endpoints and the SDK/server boundary.
+The upload generates `rust.asset.ts`; keep it with the plugin source and rebuild
+the plugin after changes. See [stored assets](../../docs/assets.md), the
+[SDK guide](../../docs/sdk.md), and the [SDK and HTTP API contract](../../docs/api-contract.md)
+for upload options and server requirements.
