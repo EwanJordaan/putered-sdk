@@ -153,9 +153,9 @@ export class Putered {
     create(options?: EnvironmentOptions): Promise<Environment>;
     connect(id: string, options?: { signal?: AbortSignal }): Promise<Environment>;
   };
-  constructor(options: { baseUrl: string; apiKey: string; fetch?: typeof fetch; config?: SdkConfig | string }) {
+  constructor(options: { baseUrl?: string; apiKey: string; fetch?: typeof fetch; config?: SdkConfig | string }) {
     let url: URL;
-    try { url = new URL(options.baseUrl); }
+    try { url = new URL(options.baseUrl === undefined ? "https://putered.com/api/compute" : options.baseUrl); }
     catch (error) { throw new PuteredError("Invalid Putered base URL.", "INVALID_INPUT", { cause: error }); }
     if (!["http:", "https:"].includes(url.protocol) || url.username || url.password || url.search || url.hash)
       throw new PuteredError("Invalid Putered base URL.", "INVALID_INPUT");

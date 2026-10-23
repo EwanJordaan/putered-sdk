@@ -8,7 +8,7 @@ Defaults: entire environment saved, internet enabled (SDK config can disable it)
 
 export async function runEnvironmentCli(args: string[]) {
   if (args[0] === "--help") { console.log(environmentUsage); return; }
-  const client = new Putered({ baseUrl: process.env.PUTERED_BASE_URL ?? "http://127.0.0.1:3000", apiKey: process.env.PUTERED_API_KEY ?? "" });
+  const client = new Putered({ baseUrl: process.env.PUTERED_BASE_URL, apiKey: process.env.PUTERED_API_KEY ?? "" });
   if (["exec", "describe"].includes(args[0])) {
     const [action, id, ...rest] = args;
     if (!id) throw new Error(environmentUsage);

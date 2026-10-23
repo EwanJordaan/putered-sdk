@@ -7,8 +7,7 @@ export function required(name: string): string {
 }
 
 export const client = new Putered({
-  // The SDK appends /v1. Use your server origin for a direct deployment.
-  baseUrl: process.env.PUTERED_BASE_URL ?? 'https://putered.com/api/compute',
+  baseUrl: process.env.PUTERED_BASE_URL,
   apiKey: required('PUTERED_API_KEY'),
   config: {},
 });

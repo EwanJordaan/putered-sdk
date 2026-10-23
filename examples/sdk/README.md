@@ -11,9 +11,9 @@ Use Node.js 22.13 or later. From this directory:
 npm install
 ```
 
-The SDK is installed from [GitHub](https://github.com/EwanJordaan/putered-sdk).
 Create an API key with execution permission in the Putered console. Hosted
-compute needs an active subscription and available credits.
+compute needs an active subscription and available credits. The SDK connects to
+hosted compute by default, so only the API key is needed.
 
 Set credentials in your shell. Do not put the key in source code or browser code.
 
@@ -21,7 +21,6 @@ PowerShell:
 
 ```powershell
 $env:PUTERED_API_KEY = '<your-api-key>'
-$env:PUTERED_BASE_URL = 'https://putered.com/api/compute'
 npm run example -- 01-create-and-run.ts
 ```
 
@@ -29,12 +28,12 @@ Bash:
 
 ```sh
 export PUTERED_API_KEY='<your-api-key>'
-export PUTERED_BASE_URL='https://putered.com/api/compute'
 npm run example -- 01-create-and-run.ts
 ```
 
-The SDK adds `/v1` to that URL. For a direct server, supply its origin and a
-server-issued project key instead. No real credentials are included here.
+For a self-hosted server, set `PUTERED_BASE_URL` to its origin and use a
+server-issued project key. The SDK adds `/v1` to the base URL. No real
+credentials are included here.
 
 If you already built this repository, you can run from its root without installing
 the example package separately:

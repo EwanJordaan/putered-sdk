@@ -4,12 +4,12 @@ The Putered TypeScript SDK connects Node.js applications to a Putered server.
 It creates and reconnects to persistent environments, runs commands, and can
 call typed tools. The server is installed and operated separately.
 
-Requires Node.js 22.13 or later. The package is not currently published to npm.
+Requires Node.js 22.13 or later.
 
 ## Install
 
 ```sh
-npm install github:EwanJordaan/putered-sdk
+npm install @putered/sdk
 ```
 
 To build a local tarball instead:
@@ -27,15 +27,14 @@ Install the generated tarball in your application with `npm install
 
 ## Connect to a server
 
-Set `PUTERED_BASE_URL` and `PUTERED_API_KEY` in the application’s private
-environment, then create an environment. Hosted compute requires an active
-subscription and available credits. The SDK adds `/v1` to the base URL:
+Set `PUTERED_API_KEY` in the application’s private environment, then create an
+environment. The SDK uses hosted compute by default and adds `/v1` to its base
+URL. Hosted compute requires an active subscription and available credits:
 
 ```ts
 import { Putered } from '@putered/sdk';
 
 const putered = new Putered({
-  baseUrl: process.env.PUTERED_BASE_URL ?? 'https://putered.com/api/compute',
   apiKey: process.env.PUTERED_API_KEY!,
 });
 const environment = await putered.environments.create();
@@ -45,6 +44,9 @@ console.log((await environment.exec('cat hello.txt')).output);
 // Persist this ID to reconnect in a later process.
 console.log(environment.id);
 ```
+
+For a self-hosted server, pass its URL as `baseUrl`. The CLI also supports
+`PUTERED_BASE_URL` for this advanced override.
 
 ## Guides and examples
 

@@ -12,7 +12,7 @@ software/configuration and workspace files) or workspace-only (less storage).
 Choose it at environment creation with settings.saveScope; capture always uses it.
 Output shows actual stored bytes. Legacy --mode state
 accepts repeatable --workspace/--home selections. Downloads never overwrite files.
-Configure PUTERED_BASE_URL and PUTERED_API_KEY.`;
+Configure PUTERED_API_KEY. PUTERED_BASE_URL is optional for self-hosting.`;
 
 function describe(record: Preset) {
   const scope = record.captureScope === "workspace-only" ? "Workspace only (less storage)" :
@@ -46,7 +46,7 @@ export async function runPresetCli(args: string[]) {
   if (mode === "complete" && (flags.has("--workspace") || flags.has("--home")))
     throw new Error("--workspace and --home require --mode state.");
 
-  const client = new Putered({ baseUrl: process.env.PUTERED_BASE_URL ?? "http://127.0.0.1:3000",
+  const client = new Putered({ baseUrl: process.env.PUTERED_BASE_URL,
     apiKey: process.env.PUTERED_API_KEY ?? "" });
   const controller = new AbortController();
   const cancel = () => controller.abort();

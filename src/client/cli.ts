@@ -41,7 +41,7 @@ async function main() {
     try { await lstat(output); throw new Error("Output already exists; choose another source file."); }
     catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
   }
-  const client = new Putered({ baseUrl: process.env.PUTERED_BASE_URL ?? "http://127.0.0.1:3000", apiKey: process.env.PUTERED_API_KEY ?? "" });
+  const client = new Putered({ baseUrl: process.env.PUTERED_BASE_URL, apiKey: process.env.PUTERED_API_KEY ?? "" });
   const reference = await client.assets.upload(source, { platform: assetPlatformSchema.parse(platform), entrypoints });
   if (output) {
     await writeFile(output, `// Stored bytes only; tool schemas and handlers stay in your codebase.\nimport { defineAsset } from "@putered/sdk/plugins";\nexport default defineAsset(${JSON.stringify(reference, null, 2)});\n`, { flag: "wx" });
