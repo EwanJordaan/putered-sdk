@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import { mkdtemp, mkdir, writeFile, readFile, cp, rm, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import { z } from 'zod';
 import { Putered, PuteredError } from '../dist/client/sdk.js';
@@ -122,7 +122,7 @@ test('SDK import does not load esbuild, TypeScript or the build module', async t
     if (['esbuild','typescript','pg','pyodide','just-bash'].includes(specifier) || specifier.startsWith('@aws-sdk/') || specifier.includes('/server/') || specifier.endsWith('/tool-package.js') || specifier.endsWith('/tool-declarations.js')) throw new Error('Server/build code loaded by SDK');
     return next(specifier, context);
   }`);
-  const result = spawnSync(process.execPath, ['--experimental-loader', loader, '--input-type=module', '-e',
+  const result = spawnSync(process.execPath, ['--experimental-loader', pathToFileURL(loader).href, '--input-type=module', '-e',
     "import {Putered} from '@putered/sdk'; import {Putered as Standalone} from '@putered/sdk'; if(typeof Putered !== 'function'||typeof Standalone !== 'function') throw new Error('Missing SDK');"], { cwd: root, encoding: 'utf8' });
   assert.equal(result.status, 0, result.stderr);
 });
@@ -137,9 +137,9 @@ for (const kind of ['local', 'external-commonjs', 'ambient']) test(`plugin decla
     await writeFile(join(source, 'tsconfig.json'), '{"compilerOptions":{"module":"ESNext","moduleResolution":"Bundler","target":"ES2022","strict":true,"esModuleInterop":true}}');
     await mkdir(join(source, 'node_modules'));
     await mkdir(join(source, 'node_modules', '@putered'));
-    await symlink(root, join(source, 'node_modules', '@putered', 'sdk'));
-    await symlink(join(root, 'node_modules', 'zod'), join(source, 'node_modules', 'zod'));
-    await symlink(join(root, 'node_modules', '@types'), join(source, 'node_modules', '@types'));
+    await symlink(root, join(source, 'node_modules', '@putered', 'sdk'), 'junction');
+    await symlink(join(root, 'node_modules', 'zod'), join(source, 'node_modules', 'zod'), 'junction');
+    await symlink(join(root, 'node_modules', '@types'), join(source, 'node_modules', '@types'), 'junction');
   }
   if (kind === 'ambient') await writeFile(join(source, 'ambient.d.ts'), 'type GlobalText = string;\n');
   await writeFile(join(source, kind === 'ambient' ? 'shape.d.ts' : 'shape.ts'),
@@ -159,9 +159,9 @@ export default definePlugin({name:'portable', tools:{classify:defineTool({
   await rm(source, { recursive: true, force: true });
   await mkdir(join(consumer, 'node_modules'));
   await mkdir(join(consumer, 'node_modules', '@putered'));
-  await symlink(root, join(consumer, 'node_modules', '@putered', 'sdk'));
-  await symlink(join(root, 'node_modules', 'zod'), join(consumer, 'node_modules', 'zod'));
-  await symlink(join(root, 'node_modules', '@types'), join(consumer, 'node_modules', '@types'));
+  await symlink(root, join(consumer, 'node_modules', '@putered', 'sdk'), 'junction');
+  await symlink(join(root, 'node_modules', 'zod'), join(consumer, 'node_modules', 'zod'), 'junction');
+  await symlink(join(root, 'node_modules', '@types'), join(consumer, 'node_modules', '@types'), 'junction');
   await writeFile(join(consumer, 'consumer.mts'), `import plugin from './bundle.mjs'; import {Putered} from '@putered/sdk';
 const client=new Putered({baseUrl:'http://localhost:3000',apiKey:'x'.repeat(32)});
 const ref=await client.tools.use(plugin); const env=await client.environments.create({tools:[ref]});

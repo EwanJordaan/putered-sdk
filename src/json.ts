@@ -78,8 +78,8 @@ export function encodeJson(value: unknown, limits: JsonLimits = {}): string {
   return JSON.stringify(jsonValue(value, limits));
 }
 
-export function canonical(value: unknown): string {
-  const json = jsonValue(value);
+export function canonical(value: unknown, limits: JsonLimits = {}): string {
+  const json = jsonValue(value, limits);
   const encode = (entry: Json): string => {
     if (Array.isArray(entry)) return `[${entry.map(encode).join(",")}]`;
     if (entry !== null && typeof entry === "object")

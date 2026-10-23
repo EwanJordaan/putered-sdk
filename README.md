@@ -51,9 +51,11 @@ console.log(environment.id);
 - [SDK guide](docs/sdk.md)
 - [SDK and HTTP API contract](docs/api-contract.md)
 - [Runnable SDK examples](examples/sdk/README.md)
+- [Vibes starter](examples/vibes/README.md)
 - [Typed tools example](examples/typed-tools/README.md)
 - [Stored assets example](examples/stored-assets/README.md)
 - [Response contracts](docs/sdk-response-contracts.md)
+- [Publishing guide](docs/publishing.md)
 
 The package exports `@putered/sdk`, `@putered/sdk/plugins`, and
 `@putered/sdk/packaging`. See the SDK guide for plugin building, stored assets,

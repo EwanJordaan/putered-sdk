@@ -27,7 +27,7 @@ async function bundlePlugin(entrypoint: string, outfile: string): Promise<string
     legalComments: "eof", metafile: true,
     // Bundled CommonJS dependencies can require Node builtins. V8 packages
     // still reject external builtin dependencies below and runtime grants stay closed.
-    banner: { js: 'import { createRequire as __puteredCreateRequire } from "node:module"; const require = __puteredCreateRequire("file:///workspace/putered-tool.mjs");' },
+    banner: { js: 'import { createRequire as __puteredCreateRequire } from "node:module"; const require = __puteredCreateRequire(process.cwd() + "/putered-tool.mjs");' },
   });
   const code = result.outputFiles[0].text;
   const uri = `data:text/javascript;base64,${Buffer.from(code).toString("base64")}`;

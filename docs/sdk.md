@@ -15,7 +15,7 @@ console.log((await environment.exec('pwd')).output);
 Files persist between requests. Git HTTPS, downloads and dependency installs work
 by default. To opt out, put `{"network":{"mode":"disabled"}}` in
 `putered.sdk.config.json` in your client’s working directory; see
-[SDK config and limits](https://github.com/EwanJordaan/Putered/blob/main/docs/internet.md#sdk-config-opt-out). `environment.describe()`
+[SDK config](#sdk-config). `environment.describe()`
 returns the settings received at create/connect without another request. Use
 `putered environments exec <id> -- 'command'` to print program output directly;
 `--json` includes the structured result and optional network usage.
@@ -26,19 +26,18 @@ first. Captured presets and shared tool assets are separate resources and remain
 Deletion requires local-disk mode or durable workspace storage; metadata-only
 registry deployments cannot safely coordinate deletion across workers.
 
-The separate `@putered/sdk` package exports `Putered` and provides
-`definePlugin`/`defineTool` through `@putered/sdk/plugins`. Server implementations
-live under `src/server` and are exported through `putered/server`. Packages are
-not published to a public registry yet; see [package installation and stored binaries](assets.md).
-Legacy `putered` / `putered/plugins` imports remain compatible.
+The standalone `@putered/sdk` package exports `Putered` and provides
+`definePlugin`/`defineTool` through `@putered/sdk/plugins`. It includes the client,
+plugin definitions and build helper; install and publishing details are in the
+[README](../README.md) and [publishing guide](publishing.md).
 
 OCI preset upload, listing, inspection and verified streaming download are exposed
 through `putered.presets`; `environment.capturePreset({ name })` saves the entire
 OCI environment by default. Set the environment’s `settings.saveScope: "workspace-only"` at creation to save only workspace
 files and restore them into a fresh standard environment with less storage.
 The creation-time choice is fixed; omitting it defaults to the entire environment.
-The CLI provides matching `putered presets` commands.
-See [preset SDK/CLI examples and scope compatibility](https://github.com/EwanJordaan/Putered/blob/main/docs/presets.md#sdk-and-cli).
+The CLI provides matching `putered presets` commands. See the
+[SDK/CLI examples](../examples/sdk/README.md).
 
 Interactive shells use the same environment and workspace:
 
@@ -63,7 +62,15 @@ Personal account keys use resumable image operations automatically when calling
 retain the operation ID; `presets.operation(id)` inspects an uncertain result.
 Transfers and captures are never blindly replayed after a dropped response.
 OCI image users and full-snapshot ownership preservation work through these same
-methods; see [non-root identity and host requirements](https://github.com/EwanJordaan/Putered/blob/main/docs/nonroot.md).
+methods; see [the OCI preset API contract](api-contract.md#assets-tools-and-oci-presets-direct-api).
+
+## SDK config
+
+`putered.sdk.config.json` is read from the client process working directory.
+The SDK accepts only a `network` policy, validates the file before making
+requests, and rejects malformed, oversized, missing explicit paths and unknown
+settings. Omitting the file allows the server defaults. A configured offline
+policy cannot be overridden by an environment create request.
 
 ## Command output and long public API requests
 
@@ -273,12 +280,12 @@ currently accepted. The registry holds up to 128 artifacts/64 MiB, with at most
 4 MiB per artifact and 2 MiB of bundled code. IDs and content are checksum-checked
 when read. Default disk publication exposes only complete files through atomic operations.
 Configured object storage holds plugin bytes while PostgreSQL supplies metadata and
-cross-process registry locks; see [storage configuration](assets.md#storage-and-server-configuration).
+cross-process registry locks; see the [API contract](api-contract.md).
 
 The SDK implements `environments.create`, `environments.connect`, `environment.exec`
 and `environment.tools.call`. `general` is the supported template. Settings include
 optional Git (off by default), execution mode, network access (enabled for new environments by default)
-and timeouts. See [internet access](https://github.com/EwanJordaan/Putered/blob/main/docs/internet.md) for the worker capability and limits.
+and timeouts. See the [API contract](api-contract.md) for request and response fields.
 There is no idle VM to suspend: tool processes end after each call, while shared
 runtime caches may remain warm. Files persist. Calls currently wait for completion;
 `wait: false` is rejected instead of returning a fake streaming handle. Client
@@ -290,7 +297,7 @@ sandbox and Node 22.13+. V8 handlers additionally enable Node permissions and de
 filesystem, subprocess, worker and native-addon grants. Native handlers can use
 normal Node APIs and available executables within the sandbox. Package context
 supplies `workspaceId`, an AbortSignal and typed `ctx.exec` for declared native
-[binary assets](assets.md); cancellation terminates the
+[binary assets](api-contract.md#assets-tools-and-oci-presets-direct-api); cancellation terminates the
 process rather than delivering live IPC abort events to the handler.
 
 `auto` accepts the plugin's declared backend. `isolate-only` rejects native tools
@@ -307,7 +314,7 @@ are not dispatched from these hosted environment scripts.
 New environments default to public HTTP(S) through an isolated proxy. SDK config
 can disable internet for all tools, including Git. Existing offline environments
 stay offline; operators can disable internet worker-wide with `PUTERED_INTERNET=0`.
-See [internet access](https://github.com/EwanJordaan/Putered/blob/main/docs/internet.md).
+See [SDK config](#sdk-config).
 Stored tools and environment execution still reject a host configured with
 shared networking; `PUTERED_NODE_NETWORK` must be
 unset or `0`. Backend selection happens before invoking a handler, and failures
@@ -321,15 +328,14 @@ still required for that deployment model.
 ## Future work
 
 Uploaded binary/toolchain assets, S3-compatible storage, PostgreSQL metadata and
-project-scoped keys are implemented; see [stored assets](assets.md). Generic isolated
+project-scoped keys are implemented; see the [API contract](api-contract.md). Generic isolated
 installation/build recipes, custom images, account/team management, tool export/deletion,
 streaming/reconnection, shell adapters for typed tools and per-call backend overrides
 remain planned. The later GitHub source adapter will import authorized private
 repositories at pinned commits and store private artifacts with provenance; no
 GitHub connection is required or configured by `tools.use()` today.
 
-See [the full runnable example](../examples/typed-tools/README.md). `npm run test:types`
+See [the runnable SDK examples](../examples/sdk/README.md). `npm run test:types`
 checks valid calls and compile-time rejection of wrong names/inputs/results. The
-SDK tests cover real sandbox invocation, durable reuse without source files,
-checksums, auth, schema validation, native file visibility and cancellation. Set
-`PUTERED_TEST_NATIVE=1` to require those sandbox tests; CI does so explicitly.
+standalone test suite covers SDK request validation, output handling, config,
+terminal calls, package imports and plugin build behavior.

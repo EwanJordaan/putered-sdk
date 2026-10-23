@@ -1,6 +1,6 @@
 {
   "name": "@putered/sdk",
-  "version": "0.1.2",
+  "version": "0.1.4",
   "type": "module",
   "description": "Typed Putered client, local plugins, stored binary assets, and optional plugin builder",
   "files": [
@@ -39,6 +39,9 @@
     }
   },
   "license": "Apache-2.0",
+  "publishConfig": {
+    "access": "public"
+  },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/EwanJordaan/putered-sdk.git"
@@ -49,9 +52,11 @@
   },
   "scripts": {
     "build": "tsc",
+    "prepare": "npm run build",
     "test": "npm run build && npm run test:types && node --test test/*.test.mjs",
     "test:types": "npm run build:plugin -- examples/typed-tools/word-count.ts examples/typed-tools/word-count.mjs && tsc -p test/types/tsconfig.json",
     "build:plugin": "node dist/tool-package.js",
+    "package:vibes": "node scripts/package-vibes.mjs",
     "prepack": "npm run build"
   },
   "optionalDependencies": {

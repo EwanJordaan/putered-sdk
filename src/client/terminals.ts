@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { PuteredError } from '../errors.js';
+import { Buffer } from 'node:buffer';
 import { randomUUID } from 'node:crypto';
 import type { Transport } from './transport.js';
 const stateSchema=z.object({id:z.string().uuid(),environmentId:z.string(),state:z.enum(['starting','running','stopping','saving','closed','failed','unknown']),
