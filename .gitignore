@@ -3,6 +3,7 @@ dist/
 work/
 *.tgz
 examples/**/*.mjs
+!examples/vibes/server.mjs
 examples/**/*.d.mts
 examples/**/*.types/
 examples/stored-assets/rust.asset.ts
