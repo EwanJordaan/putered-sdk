@@ -36,7 +36,7 @@ export const toolOptionsSchema = z.strictObject({ visibility: z.literal("private
 export const environmentSettingsSchema = z.strictObject({
   saveScope: presetSaveScopeSchema.optional(),
   git: z.boolean().optional(),
-  execution: z.strictObject({ mode: z.enum(["auto", "isolate-only", "native-only"]) }).optional(),
+  execution: z.strictObject({ mode: z.enum(["auto", "isolate-only", "native-only"]), allowSudo: z.boolean().optional() }).optional(),
   network: z.discriminatedUnion("mode", [
     z.strictObject({ mode: z.literal("disabled") }),
     internetPolicySchema,
@@ -58,6 +58,31 @@ export const createEnvironmentSchema = z.strictObject({
 export const callOptionsSchema = z.strictObject({
   wait: z.literal(true).optional(),
   timeoutMs: z.number().int().min(1).max(300000).optional(),
+});
+export const runCommandSchema = z.strictObject({
+  program: z.string().regex(/^[a-z][a-z0-9_-]{0,63}$/),
+  args: z.array(z.string().refine(value => !value.includes("\0"), "Arguments must not contain NUL."))
+    .max(4096).default([]),
+  cwd: z.string().min(1).refine(value => !value.includes("\0") &&
+    (value === "/workspace" || value.startsWith("/workspace/")) && !value.split("/").includes(".."),
+    "Working directory must stay inside /workspace.").optional(),
+  env: z.record(z.string().regex(/^[A-Za-z_][A-Za-z0-9_]*$/), z.string().refine(value => !value.includes("\0"))).optional(),
+  stdinBase64: z.string().max(87384).refine(value => value.length % 4 === 0 &&
+    /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(value) &&
+    Buffer.from(value, "base64").toString("base64") === value, "stdinBase64 must be canonical base64.").optional(),
+  stdinOpen: z.literal(true).optional(),
+  sudo: z.boolean().optional(),
+}).superRefine((value, context) => {
+  if (Buffer.byteLength(JSON.stringify({ program: value.program, args: value.args }), "utf8") > 65536)
+    context.addIssue({ code: "custom", message: "Program and arguments exceed 64 KiB." });
+  if (Buffer.byteLength(JSON.stringify(value), "utf8") > 256 * 1024)
+    context.addIssue({ code: "custom", message: "Command input exceeds 256 KiB." });
+  if (value.env && Buffer.byteLength(JSON.stringify(value.env), "utf8") > 64 * 1024)
+    context.addIssue({ code: "custom", message: "Command environment exceeds 64 KiB." });
+  if (value.stdinBase64 && Buffer.from(value.stdinBase64, "base64").byteLength > 64 * 1024)
+    context.addIssue({ code: "custom", message: "Command stdin exceeds 64 KiB." });
+  if (value.stdinBase64 !== undefined && value.stdinOpen)
+    context.addIssue({ code: "custom", message: "Static stdin and open stdin are mutually exclusive." });
 });
 export function artifactId(artifact: ToolArtifact): string {
   return `tool_${createHash("sha256").update(canonical(artifact)).digest("hex")}`;

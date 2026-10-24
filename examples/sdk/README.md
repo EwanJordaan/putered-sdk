@@ -60,6 +60,7 @@ Run a file with `npm run example -- <file>`. Set the listed variables first.
 | [09-download-snapshot.ts](09-download-snapshot.ts) | List snapshots and download one with checksum verification. | `PUTERED_SNAPSHOT_ID`, `PUTERED_DOWNLOAD_FILE` | A local archive; no new server resources. |
 | [10-terminal-session.ts](10-terminal-session.ts) | Read PTY output, preserve the cursor, send a command and exit. | `PUTERED_ENVIRONMENT_ID` | Keeps the existing environment. |
 | [11-delete-environment.ts](11-delete-environment.ts) | Permanently delete an environment with an explicit confirmation. | `PUTERED_ENVIRONMENT_ID`, `PUTERED_CONFIRM_DELETE` set to that same ID | Deletes the chosen environment. |
+| [12-stream-and-detach.ts](12-stream-and-detach.ts) | Set cwd/env, pipe stdin and stdout, then collect a detached command by ID. | None | Deletes its environment. |
 
 For example, after running 01 in PowerShell:
 

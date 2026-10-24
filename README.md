@@ -40,6 +40,7 @@ const putered = new Putered({
 const environment = await putered.environments.create();
 await environment.exec("printf 'hello\\n' > hello.txt");
 console.log((await environment.exec('cat hello.txt')).output);
+console.log((await environment.run('git', ['status', '--short'])).output);
 
 // Persist this ID to reconnect in a later process.
 console.log(environment.id);

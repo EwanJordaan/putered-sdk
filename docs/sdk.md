@@ -16,6 +16,53 @@ console.log((await environment.exec('pwd')).output);
 // Later: await putered.environments.connect(environment.id)
 ```
 
+Use `environment.run(program, args, options)` when the program and each argument
+should stay separate. It returns the same result and applies the same
+`CommandError`/`check: false` behavior as `exec()`:
+
+```ts
+const status = await environment.run('git', ['status', '--short']);
+const shell = await environment.run('sh', ['-c', 'git clone https://github.com/org/repo.git']);
+```
+
+`run()` also accepts an absolute `cwd` under `/workspace`, an environment map and static stdin
+up to 64 KiB. Set `stdout` and `stderr` to Node writable streams to receive live
+output. A `Readable` stdin source is sent in ordered chunks and closed at end; pass
+`stdin: true` with `detached: true` when you want to write interactively through a handle. Streaming calls
+return the completed result unless `detached: true` is set:
+
+```ts
+import { Readable } from 'node:stream';
+
+const result = await environment.run('python', ['-c', 'import os,sys; print(os.getcwd()); print(os.getenv("MODE")); print(sys.stdin.read())'], {
+  cwd: '/workspace', env: { MODE: 'build' }, stdin: Readable.from(['input data']), stdout: process.stdout,
+});
+
+const command = await environment.run('sh', ['-c', 'long-running-command'], { detached: true });
+for await (const chunk of command.logs()) process.stdout.write(chunk.data);
+await command.wait();
+```
+
+Detached handles expose `id`, `logs()`, `wait()`, `writeStdin()`, `closeStdin()` and
+`kill()`. They can be reacquired with `environment.getCommand(id)` after reconnecting.
+Running and saving commands hold the environment's execution lock; use separate
+environments for parallel workloads. The existing command timeout still applies.
+Log cursors are incremental; when the server reports that retained history has
+been truncated, the SDK raises `CONFLICT` instead of inventing missing output.
+`signal` on `run()` aborts the submitted command best-effort; a signal passed to
+`wait()` or `logs()` only stops that local collection. Commands are submitted once
+and are never replayed automatically. Direct Wasm Git retains progress until the
+command finishes and only supports `kill('SIGKILL')`; its interactive stdin and
+sudo are rejected.
+
+Direct `git` runs use Wasm Git and remain offline. Use an explicit `sh` or `bash`
+command for Git HTTPS; it runs through the native VM route and the environment's
+stored network policy. A program name does not grant network access. `native-only`
+environments reject direct Wasm Git, while `isolate-only` rejects every non-Git direct program.
+Other program names use the native sandbox. OCI images with a non-root UID or GID
+must use shell Git to preserve their configured file ownership.
+`environment.exec(command)` keeps its existing complete-script behavior.
+
 Files persist between requests. Git HTTPS, downloads and dependency installs work
 by default. To opt out, put `{"network":{"mode":"disabled"}}` in
 `putered.sdk.config.json` in your client’s working directory; see
@@ -122,13 +169,12 @@ For commands where a nonzero exit is expected (such as `grep` with no matches),
 use `await environment.exec(command, { check: false })` and inspect `exitCode`.
 The server response format is unchanged; `output` is added locally by the SDK.
 
-For the public account API, `async: true` submits once and polls a saved result,
-avoiding a long synchronous HTTP response while workspace changes are persisted.
-It returns the same validated result. Ordinary direct servers may return their
-normal result immediately. The default remains synchronous. Polling stops after
-30 minutes or when `signal` aborts; stopping polling does not cancel the server
-command. Collection errors include the execution ID so it can be inspected;
-the SDK never replays execution after an error or unknown outcome.
+`async: true` submits once and polls a saved result, avoiding a long synchronous
+HTTP response while workspace changes are persisted. It returns the same
+validated result. The default remains synchronous. Polling stops after 30 minutes
+or when `signal` aborts; for ordinary async collection, stopping polling does not
+cancel the command. Collection errors include the execution ID so it can be
+inspected; the SDK never replays execution after an error or unknown outcome.
 
 ## Define and build a plugin
 
@@ -286,14 +332,13 @@ when read. Default disk publication exposes only complete files through atomic o
 Configured object storage holds plugin bytes while PostgreSQL supplies metadata and
 cross-process registry locks; see the [API contract](api-contract.md).
 
-The SDK implements `environments.create`, `environments.connect`, `environment.exec`
-and `environment.tools.call`. `general` is the supported template. Settings include
+The SDK implements `environments.create`, `environments.connect`, `environment.exec`,
+direct `environment.run` and `environment.tools.call`. `general` is the supported template. Settings include
 optional Git (off by default), execution mode, network access (enabled for new environments by default)
 and timeouts. See the [API contract](api-contract.md) for request and response fields.
 There is no idle VM to suspend: tool processes end after each call, while shared
-runtime caches may remain warm. Files persist. Calls currently wait for completion;
-`wait: false` is rejected instead of returning a fake streaming handle. Client
-disconnect/abort cancels these synchronous calls, matching the existing API.
+runtime caches may remain warm. Files persist. Typed tool calls wait for completion;
+direct program runs can stream output and input through `CommandHandle`.
 
 Stored handlers run in real Node inside Bubblewrap, never in the host process
 containing server credentials. Both backend selections require a working Linux
@@ -334,8 +379,7 @@ still required for that deployment model.
 Uploaded binary/toolchain assets, S3-compatible storage, PostgreSQL metadata and
 project-scoped keys are implemented; see the [API contract](api-contract.md). Generic isolated
 installation/build recipes, custom images, account/team management, tool export/deletion,
-streaming/reconnection, shell adapters for typed tools and per-call backend overrides
-remain planned. The later GitHub source adapter will import authorized private
+shell adapters for typed tools and per-call backend overrides remain planned. The later GitHub source adapter will import authorized private
 repositories at pinned commits and store private artifacts with provenance; no
 GitHub connection is required or configured by `tools.use()` today.
 

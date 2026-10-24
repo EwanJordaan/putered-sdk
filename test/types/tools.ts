@@ -1,4 +1,4 @@
-import { Putered, PuteredError, type ErrorCode } from "@putered/sdk";
+import { Putered, PuteredError, type CommandHandle, type ExecResult, type ErrorCode, type RunOptions } from "@putered/sdk";
 import { definePlugin, defineTool, defineAsset } from "@putered/sdk/plugins";
 import { z } from "zod";
 
@@ -23,6 +23,25 @@ const invalidCode: ErrorCode = "SOMETHING_RANDOM";
 const client = new Putered({ baseUrl: "http://localhost:3000", apiKey: "x".repeat(32) });
 const ref = await client.tools.use(plugin);
 const environment = await client.environments.create({ tools: [ref] });
+const runResult = await environment.run("git", ["status", "--short"]);
+const runOutput: string = runResult.output;
+const handle: CommandHandle = await environment.run("python", ["-c", "input()"], { detached: true, stdin: true });
+await handle.writeStdin("hello\n");
+await handle.closeStdin();
+const handleResult: string = (await handle.wait()).stdout;
+void handleResult;
+// @ts-expect-error Open interactive stdin requires a detached handle.
+await environment.run("python", ["-c", "input()"], { stdin: true });
+const dynamicRunOptions: RunOptions = { detached: Boolean(Date.now()) };
+const dynamicRun: ExecResult | CommandHandle = await environment.run("sh", [], dynamicRunOptions);
+void dynamicRun;
+await client.environments.create({ settings: { execution: { mode: "auto", allowSudo: true } } });
+await environment.run("bash", ["-c", "git clone https://example.invalid/repo"], { async: true, check: false });
+// @ts-expect-error Run arguments are strings.
+await environment.run("git", [42]);
+// @ts-expect-error Run options use the same boolean check contract as exec.
+await environment.run("git", [], { check: "no" });
+void runOutput;
 const result = await environment.tools.call(ref, "count", { text: "hi" });
 // @ts-expect-error Saved metadata is immutable; callers cannot replace validation schemas.
 ref.manifest.tools.count.outputSchema = { type: "string" };

@@ -45,6 +45,7 @@ curl http://127.0.0.1:3000/v1/environments/env_… \
 | `GET /environments/{id}` | No body. | `200 Environment`; website includes `name`. |
 | `DELETE /environments/{id}` | No body. Website and direct. | `200 { "id": "…", "deleted": true }`. |
 | `POST /environments/{id}/exec` | `{ "command": string, "timeoutMs"?: 1..300000 }`. Website rejects blank or >64 KiB commands and extra fields (including SDK `wait`). Direct core also accepts optional `metered` when configured and `wait: true` as a call option; it still responds synchronously. | `200 ExecutionResult` (sync). On website, `?async=1` may return a ticket; see below. |
+| `POST /environments/{id}/run` | `{ "program": string, "args"?: string[], "timeoutMs"?: 1..300000, "wait"?: true }`. Program matches `^[a-z][a-z0-9_-]{0,63}$`; args default to `[]`, contain no NUL, are limited to 4096 entries and 64 KiB encoded JSON total. Extra fields are rejected. | `200 ExecutionResult` (sync). On website, `?async=1` may return a ticket; see below. |
 | `POST /environments/{id}/tools/call` | Direct server only: `{ "id": toolId, "tool": string, "input": any, "timeoutMs"?: 1..300000, "wait"?: true }`. | `200 { "output": any }`. |
 | `POST /environments/{id}/preset` | Direct server only: `{ "name": string, "mode"?: "complete" \| "state", "workspace"?: [relativePath], "home"?: [relativePath] }`. | `201 Preset`. |
 | `GET /environments/{id}/terminals` | Website only. | `200 [{ id, state, created_at }]` (up to 20). |
@@ -107,6 +108,24 @@ In the SDK, `exec()` adds the string property `result.output` and throws
 `CommandError` for a nonzero exit unless `check: false` is set. `output` joins
 stdout followed by stderr; it is non-enumerable and is omitted by
 `JSON.stringify(result)`. It does not preserve interleaving between streams.
+`environment.run(program, args, options)` uses this same result and error contract.
+Its argument vector is forwarded as individual strings; it is never shell-quoted
+or parsed by the SDK. Direct Git runs use offline Wasm Git. Explicit `sh`/`bash`
+commands use the native VM route and the environment's stored network policy;
+choosing a program does not grant network authority. `native-only` rejects direct
+Wasm Git, and `isolate-only` rejects every non-Git direct program.
+Other direct programs use the native sandbox. OCI images configured with a
+non-root UID or GID must use explicit shell Git so the image's ownership is
+preserved; direct Wasm Git rejects that case before executing.
+
+The SDK's `run()` accepts optional `cwd`, `env`, `stdinBase64`, `stdinOpen` and
+`sudo` fields. The program/argument vector is bounded to 64 KiB, environment data
+to 64 KiB, static stdin to 64 KiB, and the complete JSON request to 256 KiB.
+`cwd` is an absolute path equal to `/workspace` or below it, without NUL or `..`.
+Environment keys must be valid shell-style identifiers. Static stdin is canonical base64; streaming clients set `stdinOpen`
+and then send chunks to the accepted command's input route. Sudo requires
+`settings.execution.allowSudo: true` on the environment. Direct Wasm Git does not
+support sudo or interactive stdin.
 
 Minimal account command request (replace the environment ID and key):
 
@@ -130,21 +149,32 @@ response.
 
 ### Async execution and durability
 
-For the website endpoint, `POST /environments/{id}/exec?async=1` submits once and returns `202 {
+For the website endpoints, `POST /environments/{id}/exec?async=1` and
+`POST /environments/{id}/run?async=1` submit once and return `202 {
 "jobId": "<uuid>", "state": "running" }`. Poll `GET /execution-jobs/{jobId}`. The gateway-backed job
 response is `{ id, environmentId, state, httpStatus?, result?, error? }`, with state `running`,
 `completed`, `failed`, or `unknown`. `completed` contains `result: ExecutionResult`; `failed`
 contains `result: { error, code? }` and `httpStatus`. Website `async=1` works even when the client
 requests a long task, and metered website runs also use this job path.
 
-If `async=1` is used against an ordinary direct core server, the core ignores the query parameter
-and returns its normal synchronous `ExecutionResult`. The direct server does not implement
-`/v1/execution-jobs`; that route is supplied by the public gateway installed with durable job
-storage. A gateway restart changes unfinished jobs to `unknown`; if a result is absent, polling can
-return 404 and the website wrapper reports 409. In either case inspect the workspace before
-retrying. The server cannot recover a lost result or prove whether an interrupted command completed.
-Do not replay a command after timeout, disconnect, ambiguous submission, or `unknown` state. Per
-account, a running/unknown command blocks another command for that environment until inspected.
+Gateway tickets omit `commandPath`; poll `GET /execution-jobs/{jobId}`. Direct
+core tickets include `commandPath: "/environments/{id}/commands/{jobId}"` and
+use the command routes below. Completed jobs contain `result: ExecutionResult`;
+failed jobs contain an error and HTTP status. `unknown` means the server cannot
+prove whether an interrupted command completed. Never replay a command after a
+timeout, disconnect, ambiguous submission or unknown outcome.
+
+Interactive and detached SDK runs use the command route, which carries bounded
+incremental output and ordered stdin writes:
+
+| Method and path | Request | Success |
+| --- | --- | --- |
+| `GET /environments/{id}/commands/{uuid}?cursor=N` | No body | Snapshot `{ id, environmentId, state, createdAt, cursor, output: [{stream, data}], reset?, httpStatus?, result?, error? }`; output `data` is canonical base64, `reset: true` signals lost history |
+| `POST /environments/{id}/commands/{uuid}/input` | `{ sequence, input?: base64, close?: true }` | `{ nextSequence }`; omit `input` to close stdin |
+| `POST /environments/{id}/commands/{uuid}/signal` | `{ signal: "SIGTERM" | "SIGKILL" | "SIGINT" | "SIGHUP" | "SIGQUIT" | "SIGSTOP" | "SIGCONT" }` | `{ accepted: true }` |
+
+Each stdin chunk is at most 32 KiB and sequences begin at zero. The SDK never
+replays a command when collecting output or reconnecting to a command ID.
 
 ### Terminal sessions (website-backed route)
 
@@ -283,7 +313,7 @@ fields.
 
 - Website account routes add account `name` and ownership metadata; core environment records do not. Website environment creation accepts `name` and does not accept `tools`; direct creation accepts `tools` but has no account name.
 - Website environment listing exists at `GET /api/compute/v1/environments`; the core `/v1/environments` router has no GET collection route.
-- Website `?async=1` uses the gateway's durable `/execution-jobs` adapter. Direct core `/v1` has no execution job route and responds synchronously even if `async=1` is present.
+- Website `?async=1` uses the gateway's durable `/execution-jobs` adapter. Direct core `/v1` command runs return command tickets with per-environment command routes; `exec` keeps its existing synchronous response unless async command support is selected.
 - SDK `output` is convenience-only. The wire result uses separate `stdout`, `stdoutBase64`, and `stderr` fields.
 - Website personal keys do not expose the complete core plugin/asset/tool interface. Website snapshots use account-owned preset operation endpoints, while direct server preset upload also accepts one raw OCI tar POST.
 - HTTP timeout limits differ by layer: account upstream calls use the command timeout plus a 10-second allowance, the public gateway permits a 330-second upstream connection, direct server request timeout is 30 seconds for receiving a request, and SDK async polling is capped at 30 minutes. None of these creates an idempotent command retry guarantee.

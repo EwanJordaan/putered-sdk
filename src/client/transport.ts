@@ -3,9 +3,22 @@ import { encodeJson } from "../json.js";
 import { ERROR_CODES, PuteredError, codeForStatus } from "../errors.js";
 import { MAX_BYTES } from "../limits.js";
 export class Transport {
+  private readonly commandPaths = new Map<string, string>();
   get accountApi() { return this.apiKey.startsWith('pk_live_'); }
   constructor(private readonly baseUrl: string, private readonly apiKey: string,
     private readonly fetcher: typeof fetch) {}
+  rememberCommandPath(environmentId: string, commandId: string, path: string): void {
+    const key = `${environmentId}:${commandId}`;
+    this.commandPaths.delete(key);
+    this.commandPaths.set(key, path);
+    if (this.commandPaths.size > 256) this.commandPaths.delete(this.commandPaths.keys().next().value!);
+  }
+  commandPath(environmentId: string, commandId: string): string {
+    const known = this.commandPaths.get(`${environmentId}:${commandId}`);
+    if (known) return known;
+    const hosted = new URL(this.baseUrl).pathname.replace(/\/$/, "").endsWith("/api/compute");
+    return hosted ? `/execution-jobs/${commandId}` : `/environments/${environmentId}/commands/${commandId}`;
+  }
   async request<S extends z.ZodType>(path: string, method: string, schema: S,
     input?: unknown, signal?: AbortSignal, bytes?: Uint8Array): Promise<z.output<S>> {
     const body = bytes ? new Uint8Array(bytes).buffer : input === undefined ? undefined : encodeJson(input);
