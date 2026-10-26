@@ -11,10 +11,17 @@ self-hosted server, pass `baseUrl` explicitly. The CLI accepts `PUTERED_BASE_URL
 For normal work, create or reconnect to one environment and send a shell string:
 
 ```ts
-const environment = await putered.environments.create();
+const environment = await putered.environments.create({ name: 'my-agent' });
 console.log((await environment.exec('pwd')).output);
 // Later: await putered.environments.connect(environment.id)
 ```
+
+Pass an optional `name` when creating a hosted environment. Names are trimmed and
+must contain 1–100 characters after trimming. Read the returned value with
+`environment.name` or `environment.describe().name`; reconnecting preserves it.
+Omit `name` for self-hosted core servers that do not support account display names.
+Names are labels, not unique IDs: reconnect using `environment.id`. Renaming an
+existing environment is not supported.
 
 Use `environment.run(program, args, options)` when the program and each argument
 should stay separate. It returns the same result and applies the same

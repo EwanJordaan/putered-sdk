@@ -60,6 +60,15 @@ curl http://127.0.0.1:3000/v1/environments/env_… \
 created environment to `network: { mode: "disabled" }`; direct core defaults come from the server.
 Website create additionally accepts a 1–100 character `name` and defaults it to `My environment`.
 
+The SDK accepts this optional display name as `environments.create({ name })`.
+It trims surrounding whitespace and requires 1–100 characters afterward. Named
+creation requires the server response to contain exactly that normalized name;
+a missing or mismatched name is a `PROTOCOL_ERROR`. Create/connect preserve the
+optional field through `environment.name` and `environment.describe().name`.
+Unnamed core responses remain compatible when `name` is omitted. Names are not
+unique identifiers; reconnect using `environment.id`. Existing environments
+cannot currently be renamed through the SDK.
+
 Environment wire example:
 
 ```json

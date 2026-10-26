@@ -44,6 +44,7 @@ export const environmentSettingsSchema = z.strictObject({
   timeoutMs: z.number().int().min(1).max(300000).optional(),
 });
 export const environmentSchema = z.strictObject({
+  name: z.string().min(1).max(100).refine(value => value === value.trim(), "Environment names must be trimmed.").optional(),
   id: z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$/),
   tools: z.array(toolIdSchema).max(64),
   settings: environmentSettingsSchema,
@@ -51,6 +52,7 @@ export const environmentSchema = z.strictObject({
 });
 export type EnvironmentRecord = z.infer<typeof environmentSchema>;
 export const createEnvironmentSchema = z.strictObject({
+  name: z.string().trim().min(1).max(100).optional(),
   template: z.union([z.literal("general"), presetIdSchema]).optional(),
   tools: z.array(toolIdSchema).max(64).optional(),
   settings: environmentSettingsSchema.optional(),

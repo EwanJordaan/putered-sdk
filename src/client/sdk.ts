@@ -123,6 +123,8 @@ export class Environment {
     this.terminals=new EnvironmentTerminals(transport,record.id);
     this.tools = new EnvironmentTools(transport, record);
   }
+  /** Display name returned by the server; unnamed self-hosted records may omit it. */
+  get name(): string | undefined { return this.record.name; }
   capturePreset(options: CapturePresetOptions) {
     return capturePreset(this.transport, this.id, options);
   }
@@ -234,6 +236,8 @@ export class Environment {
   }
 }
 export interface EnvironmentOptions {
+  /** Optional display name, trimmed to 1–100 characters. Supported by hosted accounts. */
+  name?: string;
   template?: string;
   tools?: readonly ToolReference<ToolMap | null>[];
   settings?: z.input<typeof createEnvironmentSchema>["settings"];
@@ -276,12 +280,15 @@ export class Putered {
         const network = config.network?.mode === "internet" && requestedNetwork?.mode === "internet"
           ? { ...config.network, ...requestedNetwork } : requestedNetwork ?? config.network;
         const request = inputContract(createEnvironmentSchema, {
+          ...(value.name === undefined ? {} : { name: value.name }),
           ...(value.template === undefined ? {} : { template: value.template }),
           ...(value.tools === undefined ? {} : { tools: value.tools.map(tool => tool.id) }),
           settings: { ...value.settings, ...(network === undefined ? {} : { network }) },
         });
         checkNetwork(request.settings?.network);
         const record = await transport.request("/environments", "POST", environmentResponseSchema, request);
+        if (request.name !== undefined && record.name !== request.name)
+          throw new PuteredError("Environment response does not match the requested name.", "PROTOCOL_ERROR");
         if (request.tools && canonical([...new Set(request.tools)].sort()) !== canonical([...record.tools].sort()))
           throw new PuteredError("Environment response does not match the requested tools.", "PROTOCOL_ERROR");
         for (const key of ["git", "execution", "saveScope", "timeoutMs"] as const)

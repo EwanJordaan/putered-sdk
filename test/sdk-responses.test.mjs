@@ -46,7 +46,7 @@ function asset(bytes) {
 
 test('environment create/connect/describe accept additive metadata and reject wrong identity or malformed policy', async () => {
   const sdk = client(async () => reply({ ...record, name: 'Dashboard name', futureMetadata: true }));
-  assert.deepEqual((await sdk.environments.create()).describe(), record);
+  assert.deepEqual((await sdk.environments.create()).describe(), { ...record, name: 'Dashboard name' });
   assert.equal((await sdk.environments.connect(record.id)).id, record.id);
   for (const bad of [{ ...record, id: '../escape' }, { ...record, tools: 'wrong' }, { ...record, settings: null },
     { ...record, settings: { network: { mode: 'internet', futurePolicy: true } } }])

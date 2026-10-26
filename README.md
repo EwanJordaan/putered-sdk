@@ -37,7 +37,7 @@ import { Putered } from '@putered/sdk';
 const putered = new Putered({
   apiKey: process.env.PUTERED_API_KEY!,
 });
-const environment = await putered.environments.create();
+const environment = await putered.environments.create({ name: 'my-agent' });
 await environment.exec("printf 'hello\\n' > hello.txt");
 console.log((await environment.exec('cat hello.txt')).output);
 console.log((await environment.run('git', ['status', '--short'])).output);
@@ -45,6 +45,9 @@ console.log((await environment.run('git', ['status', '--short'])).output);
 // Persist this ID to reconnect in a later process.
 console.log(environment.id);
 ```
+
+Environment naming in this checkout is unreleased; npm version 0.2.0 does not
+yet accept the `name` option. Omit it when using that published version.
 
 For a self-hosted server, pass its URL as `baseUrl`. The CLI also supports
 `PUTERED_BASE_URL` for this advanced override.

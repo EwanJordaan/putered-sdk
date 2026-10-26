@@ -22,7 +22,12 @@ void code; void status;
 const invalidCode: ErrorCode = "SOMETHING_RANDOM";
 const client = new Putered({ baseUrl: "http://localhost:3000", apiKey: "x".repeat(32) });
 const ref = await client.tools.use(plugin);
-const environment = await client.environments.create({ tools: [ref] });
+const environment = await client.environments.create({ name: "word-counter", tools: [ref] });
+const environmentName: string | undefined = environment.name;
+const describedName: string | undefined = environment.describe().name;
+void environmentName; void describedName;
+// @ts-expect-error Environment names must be strings.
+await client.environments.create({ name: 123 });
 const runResult = await environment.run("git", ["status", "--short"]);
 const runOutput: string = runResult.output;
 const handle: CommandHandle = await environment.run("python", ["-c", "input()"], { detached: true, stdin: true });

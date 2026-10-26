@@ -19,7 +19,7 @@ or a nonzero process exit are valid results.
 | --- | --- | --- |
 | `tools.list()` | `GET /v1/tools` → tool references | Array, record/manifest shape, bounded JSON; returned references are frozen. |
 | `tools.use()` | `GET /v1/tools/{id}`, or `POST /v1/tools/use` → reference | Record shape, requested ID, packaged definition's manifest when supplied. A missing package may be published once after GET 404. |
-| `environments.create()` | `POST /v1/environments` → environment | Required record fields, requested tool set and explicit settings, network restrictions/transfer cap; permits gateway display metadata. |
+| `environments.create()` | `POST /v1/environments` → environment | Required record fields, requested name (when supplied), tool set and explicit settings, network restrictions/transfer cap; preserves optional name and discards unknown metadata. |
 | `environments.connect()` | `GET /v1/environments/{id}` → environment | Shape, matching ID and SDK network policy. |
 | `environment.describe()` | Validated cached record → frozen copy | No network read; uses the record validated by create/connect. |
 | `environment.exec()` | `POST /v1/environments/{id}/exec` → execution result | Required outputs/status/timings; canonical base64, decoded text agreement and byte bound; nonnegative timings/counters and optional metrics. Nonzero process exits are valid results. |
