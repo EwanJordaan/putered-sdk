@@ -4,7 +4,7 @@ import { persistenceSchema } from "../persistence-contract.js";
 export const environmentUsage = `Usage: putered environments create [--template <preset-id|general>] [--network internet|disabled] [--persistence full|workspace|workspace-and-dependencies|none|custom] [--include <guest-path>] [--exclude <guest-path>] [--json]
        putered environments exec <id> [--json] -- <quoted shell command>
        putered environments describe <id>
-Defaults: persistence and network come from putered.sdk.config.json. Custom paths are repeatable.`;
+Defaults: persistence and network come from putered.config.json. Custom paths are repeatable.`;
 
 export async function runEnvironmentCli(args: string[]) {
   if (args[0] === "--help") { console.log(environmentUsage); return; }

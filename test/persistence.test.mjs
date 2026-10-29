@@ -8,7 +8,7 @@ import { Putered } from '../dist/client/sdk.js';
 test('top-level persistence overrides the config default and is retained across reconnect/resume', async t => {
   const directory = await mkdtemp(join(tmpdir(), 'putered-persistence-config-'));
   t.after(() => rm(directory, { recursive: true, force: true }));
-  const config = join(directory, 'putered.sdk.config.json');
+  const config = join(directory, 'putered.config.json');
   await writeFile(config, JSON.stringify({ persistence: 'workspace-and-dependencies' }));
   const requests = []; let record;
   const fetch = async (url, options) => {

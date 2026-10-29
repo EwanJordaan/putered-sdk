@@ -54,7 +54,7 @@ const environment = await putered.environments.create({
 
 Paths are absolute guest subtrees without traversal, glob patterns or symlink
 traversal. Exclusions win. Set the default in the application's
-`putered.sdk.config.json` (or pass a config filename/object to the constructor):
+`putered.config.json` (or pass a config filename/object to the constructor):
 
 ```json
 { "persistence": "workspace" }
@@ -123,7 +123,7 @@ must use shell Git to preserve their configured file ownership.
 
 Files persist between requests. Git HTTPS, downloads and dependency installs work
 by default. To opt out, put `{"network":{"mode":"disabled"}}` in
-`putered.sdk.config.json` in your client’s working directory; see
+`putered.config.json` in your client’s working directory; see
 [SDK config](#sdk-config). `environment.describe()`
 returns the settings received at create/connect without another request. Use
 `putered environments exec <id> -- 'command'` to print program output directly;
@@ -175,7 +175,7 @@ methods; see [the OCI preset API contract](api-contract.md#assets-tools-and-oci-
 
 ## SDK config
 
-`putered.sdk.config.json` is read from the client process working directory.
+`putered.config.json` is read from the client process working directory.
 The SDK accepts only a `network` policy, validates the file before making
 requests, and rejects malformed, oversized, missing explicit paths and unknown
 settings. Omitting the file allows the server defaults. A configured offline

@@ -4,7 +4,7 @@ import { environmentSettingsSchema } from "../tool-contract.js";
 import { PuteredError } from "../errors.js";
 import { persistenceSchema } from "../persistence-contract.js";
 
-export const SDK_CONFIG_FILE = "putered.sdk.config.json";
+export const SDK_CONFIG_FILE = "putered.config.json";
 const schema = z.strictObject({ network: environmentSettingsSchema.shape.network, persistence: persistenceSchema.optional() });
 export type SdkConfig = z.input<typeof schema>;
 

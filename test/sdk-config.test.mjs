@@ -22,6 +22,6 @@ test('SDK config rejects malformed, oversized, missing and unknown settings befo
   assert.throws(() => loadSdkConfig({ network: { mode: 'disabled', maxBytesPerExecution: 1 } }),
     error => error.code === 'INVALID_INPUT');
   assert.deepEqual(loadSdkConfig({ network: { mode: 'disabled' } }), { network: { mode: 'disabled' } });
-  assert.equal(SDK_CONFIG_FILE, 'putered.sdk.config.json');
+  assert.equal(SDK_CONFIG_FILE, 'putered.config.json');
   assert.equal(requests, 0);
 });

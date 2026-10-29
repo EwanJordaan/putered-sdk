@@ -19,7 +19,7 @@ The app remembers its environment ID in `.vibes/environment.json` across restart
 Copy that ID to reconnect from another SDK client. **New workspace** creates a
 separate environment without deleting the old one.
 
-Internet is enabled by default. Change `putered.sdk.config.json` to restrict
+Internet is enabled by default. Change `putered.config.json` to restrict
 destinations or disable it; restart Vibes after changing configuration. Offline
 environments cannot download missing dependencies. This config governs execution
 on the Putered server, not a web page’s browser network requests.

@@ -13,7 +13,7 @@ try {
   const sdk = join(output, pack.filename);
   await cp(join(stage, pack.filename), sdk);
   const bundle = join(stage, 'vibes'); await mkdir(join(bundle, 'vendor'), { recursive: true });
-  for (const name of ['app', 'public', 'server.mjs', '.env.example', '.gitignore', 'putered.sdk.config.json', 'README.md', 'package.json'])
+  for (const name of ['app', 'public', 'server.mjs', '.env.example', '.gitignore', 'putered.config.json', 'README.md', 'package.json'])
     await cp(join(root, 'examples/vibes', name), join(bundle, name), { recursive: true });
   await cp(sdk, join(bundle, 'vendor', pack.filename));
   const manifest = JSON.parse(await readFile(join(bundle, 'package.json'), 'utf8'));

@@ -49,7 +49,7 @@ console.log(environment.id);
 Create environments with top-level `persistence: "workspace"`,
 `"workspace-and-dependencies"`, `"full"` or `"none"`, or a custom
 `{ mode: "custom", include: [...], exclude: [...] }` policy. Set a default using
-`{ "persistence": "workspace" }` in `putered.sdk.config.json`; explicit creation
+`{ "persistence": "workspace" }` in `putered.config.json`; explicit creation
 options override it. Use `environment.stop()` and `environment.resume()`, or let
 execution resume on demand. These APIs require the matching server and are not
 yet in npm 0.2.0. See the [SDK guide](docs/sdk.md).
