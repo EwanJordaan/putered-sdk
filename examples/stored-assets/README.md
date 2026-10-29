@@ -10,7 +10,7 @@ regular-file-only toolchain for the worker's Linux architecture and libc, with
 example links with `/usr/bin/gcc` and builds offline, so its Cargo project needs
 no downloaded crates.
 
-Set `PUTERED_BASE_URL` and `PUTERED_API_KEY`, then upload the toolchain and build
+Set `PUTERED_API_KEY`, then upload the toolchain and build
 the plugin from the repository root:
 
 ```sh

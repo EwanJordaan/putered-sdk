@@ -2,8 +2,9 @@
 
 This documents the HTTP JSON contract implemented today. It covers the account-backed API at
 `https://putered.com/api/compute/v1` (the SDK base URL is `https://putered.com/api/compute`, because
-it appends `/v1`; the public key gateway also exposes `https://api.putered.com/v1`) and the direct
-server API at `<server>/v1`. It is not a promise that the two surfaces have identical routes or
+it appends `/v1`; the public key gateway also exposes `https://api.putered.com/v1`) and the internal execution
+server API at `<server>/v1` for hosted-service operators. Customers use hosted
+compute; internal server routes are not an alternative customer deployment. It is not a promise that the two surfaces have identical routes or
 behavior. JSON objects shown below omit optional fields unless noted. Requests use `Content-Type:
 application/json` except binary upload parts and OCI archives.
 
@@ -32,8 +33,7 @@ Example:
 curl https://putered.com/api/compute/v1/environments \
   -H 'Authorization: Bearer pk_live_…'
 
-curl http://127.0.0.1:3000/v1/environments/env_… \
-  -H 'Authorization: Bearer <server-token>'
+
 ```
 
 ## Environment and command API

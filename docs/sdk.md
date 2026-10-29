@@ -5,33 +5,29 @@ Start with the [runnable examples](../examples/sdk/README.md). The
 authentication, and errors for clients that call the server directly.
 
 The SDK connects to hosted compute by default. Set `PUTERED_API_KEY` in your
-application environment and pass it to `new Putered({ apiKey })`. For a
-self-hosted server, pass `baseUrl` explicitly. The CLI accepts `PUTERED_BASE_URL`.
+application environment and pass it to `new Putered({ apiKey })`. Get the key
+from the Putered console; no server installation or base URL is required.
 
 For normal work, create or reconnect to one environment and send a shell string:
 
 ```ts
-const environment = await putered.environments.create({ name: 'my-agent' });
+const environment = await putered.environments.create();
 console.log((await environment.exec('pwd')).output);
 // Later: await putered.environments.connect(environment.id)
 ```
 
-Pass an optional `name` when creating a hosted environment. Names are trimmed and
+The unreleased SDK source supports an optional `name` when creating an environment. Names are trimmed and
 must contain 1–100 characters after trimming. Read the returned value with
 `environment.name` or `environment.describe().name`; reconnecting preserves it.
-Omit `name` for self-hosted core servers that do not support account display names.
+Omit `name` with published npm 0.2.0, which does not yet support this option.
 Names are labels, not unique IDs: reconnect using `environment.id`. Renaming an
 existing environment is not supported.
 
-Choose automatic persistence with `settings.saveScope` when creating the
-environment. `entire-environment` is the default and keeps the workspace, mutable
-home/package state, and the private Linux filesystem for OCI environments.
-`workspace-only` keeps `/workspace` and resets other mutable state when stopped.
-The standard runtime's shared OS/tool bundles remain managed by the server.
+Choose what survives stop/resume with a top-level `persistence` option:
 
 ```ts
 const environment = await putered.environments.create({
-  settings: { saveScope: 'workspace-only' }, // Or 'entire-environment'.
+  persistence: 'workspace-and-dependencies',
 });
 await environment.exec('printf saved > /workspace/note');
 await environment.stop();
@@ -39,15 +35,44 @@ const resumed = await environment.resume();
 console.log((await resumed.exec('cat /workspace/note')).output);
 ```
 
-These lifecycle methods require the updated server and SDK source; they are not
-in the previously published npm 0.2.0 release. Commands and terminal shutdowns save
-automatically. Execution also resumes on demand, so calling `resume()` explicitly
-is optional. Scope is fixed at creation and retained across reconnects. Close
-terminals and finish/cancel commands before stop; busy environments can return
-`CONFLICT`. Stop/resume saves filesystem state, not running processes or RAM.
-Synthetic mounts and temporary directories are excluded. Automatic saves preserve
-guest credential files in the selected scope; exportable presets retain their
-separate credential exclusions.
+Use `"workspace"` for project files, `"workspace-and-dependencies"` for project
+files plus standard package locations, `"full"` for all mutable environment state,
+or `"none"` to discard working state on stop. `"full"` is the server's built-in
+default. The standard OS/tool bundles remain server-managed; use an OCI template
+for a private writable Linux OS. System packages installed outside the documented
+package locations need full saving or custom paths.
+
+```ts
+const environment = await putered.environments.create({
+  persistence: {
+    mode: 'custom',
+    include: ['/workspace', '/home/putered/.config'],
+    exclude: ['/workspace/node_modules', '/workspace/cache'],
+  },
+});
+```
+
+Paths are absolute guest subtrees without traversal, glob patterns or symlink
+traversal. Exclusions win. Set the default in the application's
+`putered.sdk.config.json` (or pass a config filename/object to the constructor):
+
+```json
+{ "persistence": "workspace" }
+```
+
+Explicit creation options override the config default; reconnect/resume preserve
+the stored policy. Read it through `environment.persistence`. There is no
+`settings.saveScope` alias. Scope is fixed at creation. Execution resumes on demand,
+so explicit `resume()` is optional. Finish/cancel commands and close terminals
+before stop; busy environments may return `CONFLICT`. `none` skips file checkpoint
+writes and portable snapshots, clearing mutable files on stop or orderly shutdown.
+Stop/resume restores files rather than running processes or RAM. Synthetic mounts
+are excluded, and selected guest credentials are retained automatically unless
+excluded. Portable exports apply separate credential exclusions.
+
+These changes require the matching new SDK/server source; npm 0.2.0 does not have
+these APIs. See the server's [persistence guide](https://github.com/EwanJordaan/Putered/blob/main/docs/persistence.md)
+for exact package directories, custom restore behavior and storage boundaries.
 
 Use `environment.run(program, args, options)` when the program and each argument
 should stay separate. It returns the same result and applies the same
@@ -117,7 +142,7 @@ plugin definitions and build helper; install and publishing details are in the
 
 OCI preset upload, listing, inspection and verified streaming download are exposed
 through `putered.presets`; `environment.capturePreset({ name })` saves the entire
-OCI environment by default. Set the environment’s `settings.saveScope: "workspace-only"` at creation to save only workspace
+OCI environment by default. Set the environment’s `persistence: "workspace"` at creation to save only workspace
 files and restore them into a fresh standard environment with less storage.
 The creation-time choice is fixed; omitting it defaults to the entire environment.
 The CLI provides matching `putered presets` commands. See the
@@ -420,3 +445,59 @@ See [the runnable SDK examples](../examples/sdk/README.md). `npm run test:types`
 checks valid calls and compile-time rejection of wrong names/inputs/results. The
 standalone test suite covers SDK request validation, output handling, config,
 terminal calls, package imports and plugin build behavior.
+
+### Binary streams and command recovery (unreleased)
+
+`run()` writes raw bytes to `stdout`/`stderr` writable streams, including binary
+files and UTF-8 characters split across frames. Writable chunk boundaries have
+no text meaning; concatenate buffers or use a streaming decoder to read text.
+`command.logs()` is the UTF-8 text convenience; `command.logsBytes()` yields
+`{ stream, data: Uint8Array }` without decoding.
+
+Log history is bounded. Both iterators fail with `CONFLICT` when older output
+has been discarded. Explicitly accept that gap to continue with retained output:
+
+```ts
+for await (const chunk of command.logs({ acceptTruncation: true })) {
+  console.log(chunk.data);
+}
+const cursor = command.outputCursor;
+const reconnected = await environment.getCommand(command.id, { cursor });
+```
+
+Save `outputCursor` after consuming output to reconnect from that byte offset.
+If more history expires, accepting truncation is required again. A cursor is an
+output position, not a guarantee of application-level exactly-once consumption.
+`wait()` can still retrieve the saved result when live logs have been truncated.
+
+The direct server supports caller-generated recovery IDs for `exec` and `run`:
+
+```ts
+import { randomUUID } from 'node:crypto';
+
+const requestId = randomUUID(); // Persist before submission if needed across restarts.
+try {
+  await environment.exec('perform-side-effect', { requestId });
+} catch (error) {
+  // If submission outcome is uncertain, inspect by the known ID; do not resubmit.
+  const command = await environment.getCommand(requestId);
+  console.log(await command.wait());
+}
+```
+
+`requestId` must be a lowercase UUID. It selects async submission automatically;
+`async: false` conflicts with it. It also works with detached and streamed `run`.
+The returned ticket must match the supplied ID. Hosted support is not established;
+use this feature with a direct server that supports `requestId`.
+Commands are never automatically replayed. Direct command sessions are in memory,
+expire after five minutes, and may be evicted earlier under capacity pressure.
+A missing command or a server restart does not prove that execution never occurred;
+inspect workspace state before deciding whether to submit new work. Recovery IDs
+are not durable exactly-once execution guarantees.
+
+SDK builds in this checkout report their package version using
+`X-Putered-SDK-Version`. Hosted compute rejects reported versions older than
+0.2.0 with HTTP 426 and an upgrade instruction before execution. The published
+0.2.0 release and older published clients do not report a version; unversioned
+requests remain accepted so published 0.2.0 and ordinary HTTP clients work.
+The server cannot reliably identify an older unversioned SDK.

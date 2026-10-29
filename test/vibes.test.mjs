@@ -43,7 +43,7 @@ test('Vibes requires local-origin actions, exposes no env files and serves an is
   assert.equal((await fetch(app.base + '/.env')).status, 404);
   assert.equal((await app.post('run', { command: 'true' }, 'https://other.example')).status, 403);
   const missing = await app.post('build');
-  assert.match((await missing.json()).error, /Set PUTERED_BASE_URL/);
+  assert.match((await missing.json()).error, /Set PUTERED_API_KEY/);
 });
 
 test('Vibes keeps one environment across requests and restarts, and serves only built preview files', async t => {

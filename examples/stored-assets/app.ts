@@ -2,9 +2,8 @@ import { Putered } from "@putered/sdk";
 import cargo from "./cargo.mjs";
 
 const apiKey = process.env.PUTERED_API_KEY;
-const baseUrl = process.env.PUTERED_BASE_URL;
-if (!apiKey || !baseUrl) throw new Error("Set PUTERED_API_KEY and PUTERED_BASE_URL.");
-const putered = new Putered({ apiKey, baseUrl });
+if (!apiKey) throw new Error("Set PUTERED_API_KEY from the Putered console.");
+const putered = new Putered({ apiKey });
 const tool = await putered.tools.use(cargo);
 const environment = await putered.environments.create({
   tools: [tool], settings: { timeoutMs: 120_000 },

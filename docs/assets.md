@@ -19,7 +19,7 @@ for building and packing this SDK before its npm release.
 
 ## Upload and use
 
-With `PUTERED_API_KEY` and `PUTERED_BASE_URL` set, upload an unpacked toolchain:
+With `PUTERED_API_KEY` set, upload an unpacked toolchain:
 
 ```sh
 # From this repository; installed SDK consumers can use `putered` directly.

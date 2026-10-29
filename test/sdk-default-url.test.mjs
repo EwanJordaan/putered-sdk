@@ -12,7 +12,7 @@ test('API-key-only clients use the hosted endpoint and preserve its compute path
   assert.equal((await client.environments.create()).id, 'env_hosted');
 });
 
-test('self-hosted URLs remain explicit overrides and malformed URLs are rejected', async () => {
+test('explicit backend URLs remain available as overrides and malformed URLs are rejected', async () => {
   const client = new Putered({ baseUrl: 'http://127.0.0.1:3000/', apiKey: 'x'.repeat(32), config: {}, fetch: async url => {
     assert.equal(url, 'http://127.0.0.1:3000/v1/environments/env_local');
     return Response.json({ id: 'env_local', tools: [], settings: {} });

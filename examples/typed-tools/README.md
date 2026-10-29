@@ -12,7 +12,7 @@ npm run build
 npm run build:plugin -- examples/typed-tools/word-count.ts examples/typed-tools/word-count.mjs
 ```
 
-Set `PUTERED_BASE_URL` and `PUTERED_API_KEY` for a running Putered server, then
+Set `PUTERED_API_KEY` from the Putered console, then
 run the example:
 
 ```sh

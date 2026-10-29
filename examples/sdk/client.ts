@@ -7,7 +7,6 @@ export function required(name: string): string {
 }
 
 export const client = new Putered({
-  baseUrl: process.env.PUTERED_BASE_URL,
   apiKey: required('PUTERED_API_KEY'),
   config: {},
 });

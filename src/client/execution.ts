@@ -13,12 +13,14 @@ const jobSchema = z.object({
 
 /** Submit exactly once. Polling reads the saved result; it never replays execution. */
 export async function asyncExecution(transport: Transport, environmentId: string,
-  input: { command: string; timeoutMs?: number; wait?: true } | ({ program: string; args: string[] } & { timeoutMs?: number; wait?: true }),
+  input: { command: string; timeoutMs?: number; wait?: true; requestId?: string } | ({ program: string; args: string[] } & { timeoutMs?: number; wait?: true; requestId?: string }),
   signal?: AbortSignal, endpoint: "exec" | "run" = "exec", cancelOnAbort = false): Promise<z.infer<typeof execResultSchema>> {
   const accepted = await transport.request(`/environments/${environmentId}/${endpoint}?async=1`, "POST",
     z.union([ticketSchema, execResultSchema]), input, signal);
   // Direct core servers may return their ordinary result instead of a job ticket.
   if ("stdout" in accepted) return accepted;
+  if (input.requestId !== undefined && accepted.jobId !== input.requestId)
+    throw new PuteredError("Command ticket identity mismatch.", "PROTOCOL_ERROR");
   const commandPath = validateCommandPath(accepted.commandPath, environmentId, accepted.jobId);
   transport.rememberCommandPath(environmentId, accepted.jobId, commandPath);
   let cancelCommand: (() => void) | undefined;

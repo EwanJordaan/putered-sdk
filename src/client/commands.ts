@@ -15,6 +15,9 @@ export const snapshotSchema = z.object({
 });
 export const commandTicketSchema = z.object({ jobId: z.string().uuid(), state: z.literal("running"), commandPath: z.string().optional() });
 export type OutputChunk = { stream: "stdout" | "stderr"; data: string };
+export type OutputBytesChunk = { stream: "stdout" | "stderr"; data: Uint8Array };
+export interface LogOptions { signal?: AbortSignal; acceptTruncation?: boolean }
+export interface GetCommandOptions { cursor?: number; signal?: AbortSignal }
 export type CommandSignal = "SIGTERM" | "SIGKILL" | "SIGINT" | "SIGHUP" | "SIGQUIT" | "SIGSTOP" | "SIGCONT";
 
 function decodeBase64(value: string): Uint8Array {
@@ -24,7 +27,7 @@ function decodeBase64(value: string): Uint8Array {
 }
 function validateCursor(value: z.infer<typeof snapshotSchema>, requestedCursor: number): void {
   const outputBytes = value.output.reduce((total, item) => total + decodeBase64(item.data).byteLength, 0);
-  if (value.cursor < requestedCursor || (!value.reset && value.cursor !== requestedCursor + outputBytes))
+  if (value.cursor < requestedCursor || value.cursor < outputBytes || (!value.reset && value.cursor !== requestedCursor + outputBytes))
     throw new PuteredError("Invalid command output cursor.", "PROTOCOL_ERROR");
 }
 function commandFailure(snapshot: z.infer<typeof snapshotSchema>): never {
@@ -55,12 +58,15 @@ export class CommandHandle {
   private abortCleanup?: () => void;
   private outputPump?: Promise<void>;
   constructor(private readonly transport: Transport, readonly environmentId: string, id: string, private readonly path: string,
-    private readonly program?: string, historyLost = false, nextInputSequence = 0, stdinOpen?: boolean) {
+    private readonly program?: string, historyLost = false, nextInputSequence = 0, stdinOpen?: boolean, cursor = 0) {
     this.id = id;
+    this.cursor = cursor;
     this.lostOutputHistory = historyLost;
     this.nextInputSequence = nextInputSequence;
     this.stdinOpen = stdinOpen;
   }
+  /** Byte offset after the last yielded output frame. */
+  get outputCursor(): number { return this.cursor; }
   get result(): CommandResult | undefined { return this._result; }
   recordInputFailure(error: unknown): void { this.inputFailure = error; }
   recordOutputFailure(error: unknown): void { this.outputFailure = error; }
@@ -76,38 +82,48 @@ export class CommandHandle {
     const value = await this.transport.request(`${this.path}?cursor=${requestedCursor}`, "GET", snapshotSchema, undefined, signal);
     if (value.id !== this.id || value.environmentId !== this.environmentId)
       throw new PuteredError("Command result identity mismatch.", "PROTOCOL_ERROR");
+    validateCursor(value, requestedCursor);
     if (value.reset) {
       this.lostOutputHistory = true;
-      if (!ignoreReset) throw new PuteredError("Command output history was truncated; reconnect from the latest cursor.", "CONFLICT");
+      if (!ignoreReset) throw new PuteredError("Command output history was truncated; use logs({ acceptTruncation: true }) to continue with retained output.", "CONFLICT");
     }
-    validateCursor(value, requestedCursor);
     if (value.state !== "running") this.finish();
     if (advance) this.cursor = Math.max(this.cursor, value.cursor);
     if (value.stdinOpen !== undefined) this.stdinOpen = value.stdinOpen;
     return value;
   }
-  async *logs(options: { signal?: AbortSignal } = {}): AsyncGenerator<OutputChunk> {
+  /** UTF-8 text convenience; use logsBytes() for binary output. */
+  async *logs(options: LogOptions = {}): AsyncGenerator<OutputChunk> {
+    const decoders = { stdout: new TextDecoder(), stderr: new TextDecoder() };
+    for await (const item of this.logsBytes(options)) {
+      const data = decoders[item.stream].decode(item.data, { stream: true });
+      if (data) yield { stream: item.stream, data };
+    }
+    for (const stream of ["stdout", "stderr"] as const) {
+      const data = decoders[stream].decode();
+      if (data) yield { stream, data };
+    }
+  }
+  /** Raw output bytes. Truncation requires explicit acceptance of missing history. */
+  async *logsBytes(options: LogOptions = {}): AsyncGenerator<OutputBytesChunk> {
     if (this.logsActive) throw new PuteredError("Only one logs() iterator may read a command at a time.", "CONFLICT");
     this.logsActive = true;
     try {
-    if (this.lostOutputHistory) throw new PuteredError("Command output history was truncated; reconnect from the latest cursor.", "CONFLICT");
-    const decoders = { stdout: new TextDecoder(), stderr: new TextDecoder() };
+    if (this.lostOutputHistory && !options.acceptTruncation) throw new PuteredError("Command output history was truncated; use logs({ acceptTruncation: true }) to continue with retained output.", "CONFLICT");
     for (;;) {
       options.signal?.throwIfAborted();
-      const value = await this.snapshot(options.signal);
+      const value = await this.snapshot(options.signal, false, options.acceptTruncation === true);
+      this.lostOutputHistory = false;
+      if (value.reset) this.cursor = value.cursor - value.output.reduce((total, item) => total + decodeBase64(item.data).byteLength, 0);
       for (const item of value.output) {
-        const bytes = decodeBase64(item.data);
-        const data = decoders[item.stream].decode(bytes, { stream: true });
-        if (data) yield { stream: item.stream, data };
+        const data = decodeBase64(item.data);
+        this.cursor += data.byteLength;
+        yield { stream: item.stream, data };
       }
       if (value.state === "completed") {
         const result = execResultSchema.safeParse(value.result);
         if (!result.success) throw new PuteredError("Invalid saved command result.", "PROTOCOL_ERROR", { cause: result.error });
         this._result = commandResult(result.data, false);
-        for (const stream of ["stdout", "stderr"] as const) {
-          const tail = decoders[stream].decode();
-          if (tail) yield { stream, data: tail };
-        }
         return;
       }
       if (value.state === "failed" || value.state === "unknown") commandFailure(value);
@@ -181,15 +197,17 @@ export function validateCommandPath(path: string | undefined, environmentId: str
   return path ?? `/execution-jobs/${jobId}`;
 }
 
-export async function loadCommandHandle(transport: Transport, environmentId: string, id: string): Promise<CommandHandle> {
+export async function loadCommandHandle(transport: Transport, environmentId: string, id: string, options: GetCommandOptions = {}): Promise<CommandHandle> {
   if (!z.string().uuid().safeParse(id).success) throw new PuteredError("Command ID must be a UUID.", "INVALID_INPUT");
+  const cursor = options.cursor ?? 0;
+  if (!Number.isSafeInteger(cursor) || cursor < 0) throw new PuteredError("Invalid output cursor.", "INVALID_INPUT");
   const path = transport.commandPath(environmentId, id);
-  const value = await transport.request(`${path}?cursor=0`, "GET", snapshotSchema);
+  const value = await transport.request(`${path}?cursor=${cursor}`, "GET", snapshotSchema, undefined, options.signal);
   if (value.id !== id || value.environmentId !== environmentId)
     throw new PuteredError("Command result identity mismatch.", "PROTOCOL_ERROR");
-  validateCursor(value, 0);
+  validateCursor(value, cursor);
   return new CommandHandle(transport, environmentId, id, path, value.program, value.reset === true,
-    value.nextSequence ?? 0, value.stdinOpen);
+    value.nextSequence ?? 0, value.stdinOpen, cursor);
 }
 
 export async function pipeCommand(handle: CommandHandle, options: { stdin?: string | Uint8Array | Readable | true;
@@ -212,7 +230,7 @@ export async function pipeCommand(handle: CommandHandle, options: { stdin?: stri
 
 export async function pumpCommandOutput(handle: CommandHandle, stdout?: Writable, stderr?: Writable,
   signal?: AbortSignal): Promise<void> {
-  for await (const item of handle.logs({ signal })) {
+  for await (const item of handle.logsBytes({ signal })) {
     const sink = item.stream === "stdout" ? stdout : stderr;
     if (!sink) continue;
     await new Promise<void>((resolve, reject) => {

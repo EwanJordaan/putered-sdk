@@ -7,7 +7,8 @@
     "dist",
     "LICENSE",
     "NOTICE",
-    "README.md"
+    "README.md",
+    "putered.sdk.config.example.json"
   ],
   "bin": {
     "putered": "dist/client/cli.js"

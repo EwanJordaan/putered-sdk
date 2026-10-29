@@ -96,6 +96,15 @@ defineTool({
 const uploaded = await client.assets.upload("./rust-toolchain", { platform: "linux-x64", entrypoints: { cargo: "bin/cargo" } });
 const executablePath: string = uploaded.entrypoints.cargo;
 const stoppedEnvironment: { id: string; stopped: true } = await environment.stop();
+await client.environments.create({ persistence: "workspace" });
+await client.environments.create({ persistence: "workspace-and-dependencies" });
+await client.environments.create({ persistence: "none" });
+await client.environments.create({ persistence: { mode: "custom", include: ["/workspace"], exclude: ["/workspace/cache"] } });
+new Putered({ apiKey: "x".repeat(32), config: { persistence: "workspace" } });
+// @ts-expect-error Persistence is a top-level option, with no old settings alias.
+await client.environments.create({ settings: { saveScope: "workspace-only" } });
+// @ts-expect-error Invalid persistence policies are rejected statically.
+await client.environments.create({ persistence: "ephemeral" });
 const resumedEnvironment = await environment.resume();
 await resumedEnvironment.exec("pwd");
 void stoppedEnvironment;
@@ -104,3 +113,14 @@ void executablePath;
 uploaded.entrypoints.unknown;
 // @ts-expect-error Uploaded references cannot be changed after validation.
 uploaded.entrypoints.cargo = "other";
+
+// Command byte streams, output cursors and caller-owned submission IDs.
+await environment.exec('pwd', { requestId: '6ab8dedc-1c8b-4eed-ae76-c0a9a462bb11' });
+const recoverableCommand = await environment.run('python', [], {
+  detached: true, requestId: '6ab8dedc-1c8b-4eed-ae76-c0a9a462bb11',
+});
+for await (const chunk of recoverableCommand.logsBytes({ acceptTruncation: true })) {
+  const bytes: Uint8Array = chunk.data;
+  void bytes;
+}
+await environment.getCommand(recoverableCommand.id, { cursor: recoverableCommand.outputCursor });

@@ -31,9 +31,7 @@ export PUTERED_API_KEY='<your-api-key>'
 npm run example -- 01-create-and-run.ts
 ```
 
-For a self-hosted server, set `PUTERED_BASE_URL` to its origin and use a
-server-issued project key. The SDK adds `/v1` to the base URL. No real
-credentials are included here.
+No server setup or base URL is required.
 
 If you already built this repository, you can run from its root without installing
 the example package separately:

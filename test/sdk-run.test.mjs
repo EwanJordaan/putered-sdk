@@ -129,20 +129,20 @@ test('run streams saved output into sinks and exposes detached command handles',
     throw new Error(`Unexpected request ${url}`);
   });
   const env = await sdk.environments.connect(id);
-  const stdout = new Writable({ write(chunk, _encoding, callback) { output.push(chunk.toString()); callback(); } });
+  const stdout = new Writable({ write(chunk, _encoding, callback) { output.push(Buffer.from(chunk)); callback(); } });
   const command = await env.run('python', [], { stdin: 'static', stdout });
   assert.equal(command.stdout, '🙂');
-  assert.deepEqual(output, ['🙂']);
+  assert.equal(Buffer.concat(output).toString(), '🙂');
   const submit = requests.find(request => request.url.includes('/run?async=1'));
   assert.equal(JSON.parse(submit.options.body).stdinBase64, 'c3RhdGlj');
   assert.equal(requests.some(request => request.url.endsWith(`/commands/${first}/input`)), false);
 
   const detachedOutput = [];
   const handle = await env.run('python', [], { detached: true,
-    stdout: new Writable({ write(chunk, _encoding, callback) { detachedOutput.push(chunk.toString()); callback(); } }) });
+    stdout: new Writable({ write(chunk, _encoding, callback) { detachedOutput.push(Buffer.from(chunk)); callback(); } }) });
   assert.equal(handle.id, first);
   assert.equal((await handle.wait()).stdout, '🙂');
-  assert.deepEqual(detachedOutput, ['🙂']);
+  assert.equal(Buffer.concat(detachedOutput).toString(), '🙂');
   assert.equal((await env.getCommand(first)).id, first);
 });
 

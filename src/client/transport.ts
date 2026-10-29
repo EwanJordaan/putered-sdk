@@ -1,7 +1,10 @@
+import { createRequire } from "node:module";
 import { z } from "zod";
 import { encodeJson } from "../json.js";
 import { ERROR_CODES, PuteredError, codeForStatus } from "../errors.js";
 import { MAX_BYTES } from "../limits.js";
+const { version: sdkVersion } = createRequire(import.meta.url)("../../package.json") as { version: string };
+
 export class Transport {
   private readonly commandPaths = new Map<string, string>();
   get accountApi() { return this.apiKey.startsWith('pk_live_'); }
@@ -44,7 +47,7 @@ export class Transport {
     let response: Response;
     try { response = await this.fetcher(`${this.baseUrl}/v1${path}`, {
       ...init, redirect: "manual",
-      headers: { ...init.headers, Authorization: `Bearer ${this.apiKey}` },
+      headers: { ...init.headers, "X-Putered-SDK-Version": sdkVersion, Authorization: `Bearer ${this.apiKey}` },
     }); } catch (error) {
       throw new PuteredError(init.signal?.aborted ? "Request cancelled; execution may have partial side effects." : "Could not reach Putered; do not retry execution blindly.",
         init.signal?.aborted ? "CANCELLED" : "NETWORK_ERROR", { cause: error });

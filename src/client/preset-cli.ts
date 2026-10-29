@@ -7,12 +7,11 @@ export const presetUsage = `Usage:
   putered presets inspect <preset-id> [--json]
   putered presets download <preset-id> --output <archive.tar> [--json]
 
-What to save is stored per environment: entire-environment (default, saves installed
-software/configuration and workspace files) or workspace-only (less storage).
-Choose it at environment creation with settings.saveScope; capture always uses it.
+Persistence is chosen at environment creation with the top-level persistence option.
+Captures contain resumable selected state; persistence: none does not retain snapshots.
 Output shows actual stored bytes. Legacy --mode state
 accepts repeatable --workspace/--home selections. Downloads never overwrite files.
-Configure PUTERED_API_KEY. PUTERED_BASE_URL is optional for self-hosting.`;
+Configure PUTERED_API_KEY from the Putered console.`;
 
 function describe(record: Preset) {
   const scope = record.captureScope === "workspace-only" ? "Workspace only (less storage)" :

@@ -10,7 +10,7 @@ import { CommandHandle, commandTicketSchema, loadCommandHandle, pipeCommand, pum
 import { Readable, Writable } from "node:stream";
 export { CommandError } from "./command-output.js";
 export { CommandHandle } from "./commands.js";
-export type { CommandSignal, OutputChunk } from "./commands.js";
+export type { CommandSignal, OutputChunk, OutputBytesChunk, LogOptions, GetCommandOptions } from "./commands.js";
 import { Assets } from "./assets.js";
 import { Presets, capturePreset, type CapturePresetOptions } from "./presets.js";
 import { EnvironmentTerminals } from './terminals.js';
@@ -26,6 +26,8 @@ export type { CapturePresetOptions, PresetRequestOptions, PresetTransferOptions,
 import { compileToolSchema, toolValidator } from "../tool-validation.js";
 import { loadSdkConfig, type SdkConfig } from "./config.js";
 import { DEFAULT_INTERNET_BYTES, preservesNetworkRules } from "../network-policy.js";
+import { persistenceSchema, samePersistence, type Persistence } from "../persistence-contract.js";
+export type { Persistence } from "../persistence-contract.js";
 import { environmentResponseSchema, storedToolResponseSchema, execResultSchema, toolCallResponseSchema } from "./responses.js";
 export type { SdkConfig } from "./config.js";
 export type { InternetPolicy, NetworkRuntime } from "../network-policy.js";
@@ -33,6 +35,15 @@ export type { InternetPolicy, NetworkRuntime } from "../network-policy.js";
 function inputContract<S extends z.ZodType>(schema: S, value: unknown): z.output<S> {
   try { return schema.parse(value); }
   catch (error) { throw new PuteredError("Input does not match the SDK contract.", "INVALID_INPUT", { cause: error }); }
+}
+
+/** Caller IDs are supported by the direct server and force async submission. */
+function recoveryOptions(options: { requestId?: string; async?: boolean }): { requestId?: string } {
+  if (options.requestId === undefined) return {};
+  if (!z.string().uuid().safeParse(options.requestId).success || options.requestId !== options.requestId.toLowerCase())
+    throw new PuteredError("requestId must be a lowercase UUID.", "INVALID_INPUT");
+  if (options.async === false) throw new PuteredError("requestId requires async execution.", "INVALID_INPUT");
+  return { requestId: options.requestId };
 }
 
 declare const toolTypes: unique symbol;
@@ -44,10 +55,10 @@ export interface ToolReference<T extends ToolMap | null = null> {
 }
 export interface ToolUseOptions { visibility?: "private" }
 export interface CallOptions { wait?: true; timeoutMs?: number; signal?: AbortSignal }
-export interface ExecOptions extends CallOptions { async?: boolean; check?: boolean }
+export interface ExecOptions extends CallOptions { async?: boolean; check?: boolean; requestId?: string }
 interface RunOptionsBase extends CallOptions {
   async?: boolean; check?: boolean; cwd?: string; env?: Readonly<Record<string, string>>;
-  stdout?: Writable; stderr?: Writable; sudo?: boolean;
+  stdout?: Writable; stderr?: Writable; sudo?: boolean; requestId?: string;
 }
 export type RunOptions = RunOptionsBase & (
   { stdin?: string | Uint8Array | Readable; detached?: boolean } |
@@ -123,12 +134,18 @@ export class Environment {
     this.terminals=new EnvironmentTerminals(transport,record.id);
     this.tools = new EnvironmentTools(transport, record);
   }
-  /** Display name returned by the server; unnamed self-hosted records may omit it. */
+  /** Display name returned by Putered; older records may omit it. */
   get name(): string | undefined { return this.record.name; }
+  /** Stored creation-time policy. Reconnect keeps this choice. */
+  get persistence(): Persistence {
+    return structuredClone(this.record.persistence ?? "full");
+  }
   capturePreset(options: CapturePresetOptions) {
     return capturePreset(this.transport, this.id, options);
   }
-  getCommand(id: string): Promise<CommandHandle> { return loadCommandHandle(this.transport, this.id, id); }
+  getCommand(id: string, options: import("./commands.js").GetCommandOptions = {}): Promise<CommandHandle> {
+    return loadCommandHandle(this.transport, this.id, id, options);
+  }
   /** Save the selected filesystem scope and release local state. Finish or cancel
    * active commands/terminals first. Does not save live processes or RAM. */
   async stop(options: { signal?: AbortSignal } = {}): Promise<{ id: string; stopped: true }> {
@@ -140,6 +157,8 @@ export class Environment {
     const record = await this.transport.request(`/environments/${this.id}/resume`, "POST",
       environmentResponseSchema, {}, options.signal);
     if (record.id !== this.id) throw new PuteredError("Environment response identity mismatch.", "PROTOCOL_ERROR");
+    if (!samePersistence(this.persistence, record.persistence ?? "full"))
+      throw new PuteredError("Resume response changed the environment's persistence policy.", "PROTOCOL_ERROR");
     return new Environment(this.transport, record);
   }
   /** Permanently delete this environment and its stored workspace data. */
@@ -159,10 +178,11 @@ export class Environment {
       throw new PuteredError("check must be a boolean.", "INVALID_INPUT");
     const input = {
       command,
+      ...recoveryOptions(options),
       ...inputContract(callOptionsSchema, { ...(options.wait === undefined ? {} : { wait: options.wait }),
         ...(options.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs }) }),
     };
-    const result = options.async
+    const result = options.async || options.requestId !== undefined
       ? await asyncExecution(this.transport, this.id, input, options.signal)
       : await this.transport.request(`/environments/${this.id}/exec`, "POST", execResultSchema, input, options.signal);
     return commandResult(result, options.check ?? true);
@@ -205,12 +225,13 @@ export class Environment {
     });
     const input = {
       ...command,
+      ...recoveryOptions(options),
       ...inputContract(callOptionsSchema, { ...(options.wait === undefined ? {} : { wait: options.wait }),
         ...(options.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs }) }),
     };
     const interactive = options.detached === true || options.stdout !== undefined || options.stderr !== undefined ||
       openStdin || (options.stdin !== undefined && !stdinBytes);
-    const result = options.async && !interactive
+    const result = (options.async || options.requestId !== undefined) && !interactive
       ? await asyncExecution(this.transport, this.id, input, options.signal, "run", true)
       : interactive
         ? await this.startRun(input, options)
@@ -226,6 +247,8 @@ export class Environment {
     try {
       ticket = await this.transport.request(`/environments/${this.id}/run?async=1`, "POST", commandTicketSchema, input, options.signal);
     } catch (error) { throw error; }
+    if (input.requestId !== undefined && ticket.jobId !== input.requestId)
+      throw new PuteredError("Command ticket identity mismatch.", "PROTOCOL_ERROR");
     const path = validateCommandPath(ticket.commandPath, this.id, ticket.jobId);
     this.transport.rememberCommandPath(this.id, ticket.jobId, path);
     const handle = new CommandHandle(this.transport, this.id, ticket.jobId, path, input.program as string,
@@ -249,6 +272,7 @@ export class Environment {
   }
 }
 export interface EnvironmentOptions {
+  persistence?: Persistence;
   /** Optional display name, trimmed to 1–100 characters. Supported by hosted accounts. */
   name?: string;
   template?: string;
@@ -289,10 +313,16 @@ export class Putered {
     this.presets = new Presets(transport);
     this.environments = {
       create: async (value = {}) => {
+        if (!value || typeof value !== "object" || Array.isArray(value) ||
+            Object.keys(value).some(key => !["name", "template", "tools", "settings", "persistence"].includes(key)))
+          throw new PuteredError("Unknown or invalid environment creation option.", "INVALID_INPUT");
+        const persistence = value.persistence === undefined ? config.persistence
+          : inputContract(persistenceSchema, value.persistence);
         const requestedNetwork = value.settings?.network;
         const network = config.network?.mode === "internet" && requestedNetwork?.mode === "internet"
           ? { ...config.network, ...requestedNetwork } : requestedNetwork ?? config.network;
         const request = inputContract(createEnvironmentSchema, {
+          ...(persistence === undefined ? {} : { persistence }),
           ...(value.name === undefined ? {} : { name: value.name }),
           ...(value.template === undefined ? {} : { template: value.template }),
           ...(value.tools === undefined ? {} : { tools: value.tools.map(tool => tool.id) }),
@@ -300,11 +330,13 @@ export class Putered {
         });
         checkNetwork(request.settings?.network);
         const record = await transport.request("/environments", "POST", environmentResponseSchema, request);
+        if (request.persistence !== undefined && (record.persistence === undefined || !samePersistence(request.persistence, record.persistence)))
+          throw new PuteredError("Environment response does not preserve the requested persistence policy.", "PROTOCOL_ERROR");
         if (request.name !== undefined && record.name !== request.name)
           throw new PuteredError("Environment response does not match the requested name.", "PROTOCOL_ERROR");
         if (request.tools && canonical([...new Set(request.tools)].sort()) !== canonical([...record.tools].sort()))
           throw new PuteredError("Environment response does not match the requested tools.", "PROTOCOL_ERROR");
-        for (const key of ["git", "execution", "saveScope", "timeoutMs"] as const)
+        for (const key of ["git", "execution", "timeoutMs"] as const)
           if (request.settings?.[key] !== undefined && canonical(request.settings[key]) !== canonical(record.settings[key] ?? null))
             throw new PuteredError("Environment response does not match the requested settings.", "PROTOCOL_ERROR");
         const wanted = request.settings?.network, actual = record.settings.network;

@@ -2,9 +2,8 @@ import { Putered } from "@putered/sdk";
 import wordCount from "./word-count.mjs";
 
 const apiKey = process.env.PUTERED_API_KEY;
-const baseUrl = process.env.PUTERED_BASE_URL;
-if (!apiKey || !baseUrl) throw new Error("Set PUTERED_API_KEY and PUTERED_BASE_URL.");
-const putered = new Putered({ apiKey, baseUrl });
+if (!apiKey) throw new Error("Set PUTERED_API_KEY from the Putered console.");
+const putered = new Putered({ apiKey });
 
 // A single call: private upload on first use, content-addressed reuse thereafter.
 const tool = await putered.tools.use(wordCount);

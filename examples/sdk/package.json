@@ -7,6 +7,6 @@
     "example": "tsx",
     "check": "tsc --noEmit"
   },
-  "dependencies": { "@putered/sdk": "github:EwanJordaan/putered-sdk" },
+  "dependencies": { "@putered/sdk": "0.2.0" },
   "devDependencies": { "@types/node": "26.6.5", "tsx": "4.23.15", "typescript": "6.0.3" }
 }

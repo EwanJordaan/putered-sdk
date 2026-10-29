@@ -1,10 +1,10 @@
 import { Putered } from "./sdk.js";
-import { presetSaveScopeSchema } from "../preset-contract.js";
+import { persistenceSchema } from "../persistence-contract.js";
 
-export const environmentUsage = `Usage: putered environments create [--template <preset-id|general>] [--network internet|disabled] [--save-scope entire-environment|workspace-only] [--json]
+export const environmentUsage = `Usage: putered environments create [--template <preset-id|general>] [--network internet|disabled] [--persistence full|workspace|workspace-and-dependencies|none|custom] [--include <guest-path>] [--exclude <guest-path>] [--json]
        putered environments exec <id> [--json] -- <quoted shell command>
        putered environments describe <id>
-Defaults: entire environment saved, internet enabled (SDK config can disable it).`;
+Defaults: persistence and network come from putered.sdk.config.json. Custom paths are repeatable.`;
 
 export async function runEnvironmentCli(args: string[]) {
   if (args[0] === "--help") { console.log(environmentUsage); return; }
@@ -34,21 +34,27 @@ export async function runEnvironmentCli(args: string[]) {
     return;
   }
   if (args[0] !== "create") throw new Error(environmentUsage);
-  const flags = new Map<string, string>(); let json = false;
+  const flags = new Map<string, string>(); const include: string[] = [], exclude: string[] = []; let json = false;
   for (let index = 1; index < args.length; index++) {
     const flag = args[index];
     if (flag === "--json") { if (json) throw new Error("Duplicate --json option."); json = true; continue; }
-    if (!["--template", "--save-scope", "--network"].includes(flag) || flags.has(flag)) throw new Error(`Unknown or duplicate creation option: ${flag}`);
+    if (flag === "--include" || flag === "--exclude") {
+      const value = args[++index]; if (!value || value.startsWith("--")) throw new Error(`${flag} requires a value.`);
+      (flag === "--include" ? include : exclude).push(value); continue;
+    }
+    if (!["--template", "--persistence", "--network"].includes(flag) || flags.has(flag)) throw new Error(`Unknown or duplicate creation option: ${flag}`);
     const value = args[++index];
     if (!value || value.startsWith("--")) throw new Error(`${flag} requires a value.`);
     flags.set(flag, value);
   }
-  const saveScope = presetSaveScopeSchema.parse(flags.get("--save-scope") ?? "entire-environment");
+  const mode = flags.get("--persistence");
+  if ((include.length || exclude.length) && mode !== "custom") throw new Error("--include/--exclude require --persistence custom.");
+  const persistence = mode === undefined ? undefined : persistenceSchema.parse(mode === "custom" ? { mode, include, exclude } : mode);
   const network = flags.get("--network");
   if (network !== undefined && !["internet", "disabled"].includes(network)) throw new Error("--network must be internet or disabled.");
-  const environment = await client.environments.create({ template: flags.get("--template") ?? "general", settings: { saveScope,
+  const environment = await client.environments.create({ template: flags.get("--template") ?? "general", persistence, settings: {
     ...(network === undefined ? {} : { network: { mode: network as "internet" | "disabled" } }) } });
   const record = environment.describe();
   console.log(json ? JSON.stringify(record, null, 2) :
-    `${environment.id} — ${saveScope === "workspace-only" ? "Workspace only" : "Entire environment"}; internet ${record.settings.network?.mode === "internet" ? "enabled" : "disabled"}\nNext: putered environments exec ${environment.id} -- 'pwd'`);
+    `${environment.id} — ${typeof environment.persistence === "string" ? environment.persistence : "custom"}; internet ${record.settings.network?.mode === "internet" ? "enabled" : "disabled"}\nNext: putered environments exec ${environment.id} -- 'pwd'`);
 }

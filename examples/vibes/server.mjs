@@ -11,7 +11,7 @@ const types = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; ch
 export function createVibesServer({ client, directory = project } = {}) {
   const state = join(directory, '.vibes');
   let environment, environmentId, busy = false;
-  const sdk = () => { if (!client) throw new Error('Set PUTERED_BASE_URL and PUTERED_API_KEY in .env, then restart Vibes.'); return client; };
+  const sdk = () => { if (!client) throw new Error('Set PUTERED_API_KEY in .env, then restart Vibes.'); return client; };
   async function storedId() {
     if (environmentId) return environmentId;
     try { environmentId = JSON.parse(await readFile(join(state, 'environment.json'), 'utf8')).id; }
@@ -90,8 +90,8 @@ export function createVibesServer({ client, directory = project } = {}) {
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   let client;
-  if (process.env.PUTERED_BASE_URL && process.env.PUTERED_API_KEY)
-    client = new Putered({ baseUrl: process.env.PUTERED_BASE_URL, apiKey: process.env.PUTERED_API_KEY });
+  if (process.env.PUTERED_API_KEY)
+    client = new Putered({ apiKey: process.env.PUTERED_API_KEY });
   const port = Number(process.env.PORT || 4173);
   if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('PORT must be between 1 and 65535.');
   const server = createVibesServer({ client });

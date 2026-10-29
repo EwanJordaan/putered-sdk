@@ -15,7 +15,7 @@ export const presetCompressionSchema = z.enum(["larger-image", "smaller-image"])
 export const presetSaveScopeSchema = z.enum(["entire-environment", "workspace-only"]);
 export const capturePresetSchema = z.strictObject({
   name: presetNameSchema,
-  // Compatibility for existing callers. New clients select saveScope at environment creation.
+  // Compatibility for existing callers. New clients select persistence at environment creation.
   mode: z.enum(["complete", "state"]).optional(),
   // Explicit opt-in; "." selects a whole tree. Known credentials are still excluded.
   workspace: z.array(z.string().refine(path => path === "." || safeAssetPath(path))).max(128).default([]),
