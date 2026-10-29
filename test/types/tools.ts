@@ -95,6 +95,10 @@ defineTool({
 });
 const uploaded = await client.assets.upload("./rust-toolchain", { platform: "linux-x64", entrypoints: { cargo: "bin/cargo" } });
 const executablePath: string = uploaded.entrypoints.cargo;
+const stoppedEnvironment: { id: string; stopped: true } = await environment.stop();
+const resumedEnvironment = await environment.resume();
+await resumedEnvironment.exec("pwd");
+void stoppedEnvironment;
 void executablePath;
 // @ts-expect-error Uploads retain the known entrypoint names.
 uploaded.entrypoints.unknown;

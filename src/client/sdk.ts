@@ -129,6 +129,19 @@ export class Environment {
     return capturePreset(this.transport, this.id, options);
   }
   getCommand(id: string): Promise<CommandHandle> { return loadCommandHandle(this.transport, this.id, id); }
+  /** Save the selected filesystem scope and release local state. Finish or cancel
+   * active commands/terminals first. Does not save live processes or RAM. */
+  async stop(options: { signal?: AbortSignal } = {}): Promise<{ id: string; stopped: true }> {
+    return this.transport.request(`/environments/${this.id}/stop`, "POST",
+      z.object({ id: z.literal(this.id), stopped: z.literal(true) }), {}, options.signal);
+  }
+  /** Restore saved files now. exec/run also resume automatically on demand. */
+  async resume(options: { signal?: AbortSignal } = {}): Promise<Environment> {
+    const record = await this.transport.request(`/environments/${this.id}/resume`, "POST",
+      environmentResponseSchema, {}, options.signal);
+    if (record.id !== this.id) throw new PuteredError("Environment response identity mismatch.", "PROTOCOL_ERROR");
+    return new Environment(this.transport, record);
+  }
   /** Permanently delete this environment and its stored workspace data. */
   async delete(options: { signal?: AbortSignal } = {}): Promise<{ id: string; deleted: true }> {
     const result = await this.transport.request(`/environments/${this.id}`, "DELETE",

@@ -46,6 +46,14 @@ console.log((await environment.run('git', ['status', '--short'])).output);
 console.log(environment.id);
 ```
 
+Automatic persistence is controlled by `settings.saveScope`: use
+`'workspace-only'` to keep `/workspace`, or `'entire-environment'` (the default)
+to also retain home/package state and a private OCI Linux filesystem. The source
+SDK's `await environment.stop()` saves and releases local guest state;
+`await environment.resume()` restores it. Execution also resumes on demand.
+These methods require the updated server and are not yet in npm 0.2.0.
+See the [SDK guide](docs/sdk.md) for an example and persistence boundaries.
+
 Environment naming in this checkout is unreleased; npm version 0.2.0 does not
 yet accept the `name` option. Omit it when using that published version.
 

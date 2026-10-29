@@ -23,6 +23,32 @@ Omit `name` for self-hosted core servers that do not support account display nam
 Names are labels, not unique IDs: reconnect using `environment.id`. Renaming an
 existing environment is not supported.
 
+Choose automatic persistence with `settings.saveScope` when creating the
+environment. `entire-environment` is the default and keeps the workspace, mutable
+home/package state, and the private Linux filesystem for OCI environments.
+`workspace-only` keeps `/workspace` and resets other mutable state when stopped.
+The standard runtime's shared OS/tool bundles remain managed by the server.
+
+```ts
+const environment = await putered.environments.create({
+  settings: { saveScope: 'workspace-only' }, // Or 'entire-environment'.
+});
+await environment.exec('printf saved > /workspace/note');
+await environment.stop();
+const resumed = await environment.resume();
+console.log((await resumed.exec('cat /workspace/note')).output);
+```
+
+These lifecycle methods require the updated server and SDK source; they are not
+in the previously published npm 0.2.0 release. Commands and terminal shutdowns save
+automatically. Execution also resumes on demand, so calling `resume()` explicitly
+is optional. Scope is fixed at creation and retained across reconnects. Close
+terminals and finish/cancel commands before stop; busy environments can return
+`CONFLICT`. Stop/resume saves filesystem state, not running processes or RAM.
+Synthetic mounts and temporary directories are excluded. Automatic saves preserve
+guest credential files in the selected scope; exportable presets retain their
+separate credential exclusions.
+
 Use `environment.run(program, args, options)` when the program and each argument
 should stay separate. It returns the same result and applies the same
 `CommandError`/`check: false` behavior as `exec()`:
