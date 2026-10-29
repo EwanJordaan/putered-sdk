@@ -1,3 +1,9 @@
 {
-  "persistence": "full"
+  "persistence": "full",
+  "execution": {
+    "default": "native",
+    "programs": {
+      "git": "v8"
+    }
+  }
 }

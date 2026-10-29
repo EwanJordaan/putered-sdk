@@ -273,6 +273,8 @@ export class Environment {
 }
 export interface EnvironmentOptions {
   persistence?: Persistence;
+  /** Default execution backend preference for commands in the new environment. */
+  execution?: z.input<typeof createEnvironmentSchema>["execution"];
   /** Optional display name, trimmed to 1–100 characters. Supported by hosted accounts. */
   name?: string;
   template?: string;
@@ -314,15 +316,18 @@ export class Putered {
     this.environments = {
       create: async (value = {}) => {
         if (!value || typeof value !== "object" || Array.isArray(value) ||
-            Object.keys(value).some(key => !["name", "template", "tools", "settings", "persistence"].includes(key)))
+            Object.keys(value).some(key => !["name", "template", "tools", "settings", "persistence", "execution"].includes(key)))
           throw new PuteredError("Unknown or invalid environment creation option.", "INVALID_INPUT");
         const persistence = value.persistence === undefined ? config.persistence
           : inputContract(persistenceSchema, value.persistence);
+        const execution = value.execution === undefined ? config.execution
+          : inputContract(createEnvironmentSchema.shape.execution!, value.execution);
         const requestedNetwork = value.settings?.network;
         const network = config.network?.mode === "internet" && requestedNetwork?.mode === "internet"
           ? { ...config.network, ...requestedNetwork } : requestedNetwork ?? config.network;
         const request = inputContract(createEnvironmentSchema, {
           ...(persistence === undefined ? {} : { persistence }),
+          ...(execution === undefined ? {} : { execution }),
           ...(value.name === undefined ? {} : { name: value.name }),
           ...(value.template === undefined ? {} : { template: value.template }),
           ...(value.tools === undefined ? {} : { tools: value.tools.map(tool => tool.id) }),
@@ -332,6 +337,10 @@ export class Putered {
         const record = await transport.request("/environments", "POST", environmentResponseSchema, request);
         if (request.persistence !== undefined && (record.persistence === undefined || !samePersistence(request.persistence, record.persistence)))
           throw new PuteredError("Environment response does not preserve the requested persistence policy.", "PROTOCOL_ERROR");
+        const expectedExecution = request.execution === undefined ? undefined
+          : { default: request.execution.default ?? "native", ...(request.execution.programs === undefined ? {} : { programs: request.execution.programs }) };
+        if (expectedExecution !== undefined && canonical(expectedExecution) !== canonical(record.execution ?? null))
+          throw new PuteredError("Environment response does not preserve the requested execution preference.", "PROTOCOL_ERROR");
         if (request.name !== undefined && record.name !== request.name)
           throw new PuteredError("Environment response does not match the requested name.", "PROTOCOL_ERROR");
         if (request.tools && canonical([...new Set(request.tools)].sort()) !== canonical([...record.tools].sort()))

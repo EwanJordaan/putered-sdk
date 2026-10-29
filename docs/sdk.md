@@ -60,6 +60,25 @@ traversal. Exclusions win. Set the default in the application's
 { "persistence": "workspace" }
 ```
 
+New environments default to native command execution. You can choose a default
+and override it for individual programs with the top-level `execution`
+preference. Each value can be `native`, `v8` or `auto`:
+
+```json
+{
+  "execution": {
+    "default": "native",
+    "programs": { "git": "v8" }
+  }
+}
+```
+
+The same object can be passed as `execution` to `environments.create()`; that
+explicit value overrides the config. This preference is distinct from
+`settings.execution`, which sets execution security policy. Per-program
+preferences apply to direct `run()` calls; they do not select backends for
+programs launched inside an `exec()` shell script. Git is currently the only direct program with a V8 backend; unsupported selections fail before execution. `exec()` uses the bash preference or the default, and V8 bash is not yet supported. Terminal sessions use native execution.
+
 Explicit creation options override the config default; reconnect/resume preserve
 the stored policy. Read it through `environment.persistence`. There is no
 `settings.saveScope` alias. Scope is fixed at creation. Execution resumes on demand,
@@ -113,12 +132,11 @@ and are never replayed automatically. Direct Wasm Git retains progress until the
 command finishes and only supports `kill('SIGKILL')`; its interactive stdin and
 sudo are rejected.
 
-Direct `git` runs use Wasm Git and remain offline. Use an explicit `sh` or `bash`
-command for Git HTTPS; it runs through the native VM route and the environment's
-stored network policy. A program name does not grant network access. `native-only`
-environments reject direct Wasm Git, while `isolate-only` rejects every non-Git direct program.
-Other program names use the native sandbox. OCI images with a non-root UID or GID
-must use shell Git to preserve their configured file ownership.
+Direct `git` uses native execution by default, or offline Wasm Git when selected
+with `v8` (or `auto` where supported). Native Git uses the environment's stored
+network policy. A program name does not grant network access. The `native-only`
+policy rejects V8 Git, and `isolate-only` rejects native programs. Non-root OCI
+environments require native Git to preserve their configured file ownership.
 `environment.exec(command)` keeps its existing complete-script behavior.
 
 Files persist between requests. Git HTTPS, downloads and dependency installs work

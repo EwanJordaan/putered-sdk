@@ -43,8 +43,13 @@ export const environmentSettingsSchema = z.strictObject({
   ]).optional(),
   timeoutMs: z.number().int().min(1).max(300000).optional(),
 });
+export const executionPreferenceSchema = z.strictObject({
+  default: z.enum(["auto", "native", "v8"]).optional(),
+  programs: z.record(z.string().regex(/^[a-z][a-z0-9_-]{0,63}$/), z.enum(["auto", "native", "v8"])).optional(),
+});
 export const environmentSchema = z.strictObject({
   persistence: persistenceSchema.optional(),
+  execution: executionPreferenceSchema.optional(),
   name: z.string().min(1).max(100).refine(value => value === value.trim(), "Environment names must be trimmed.").optional(),
   id: z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$/),
   tools: z.array(toolIdSchema).max(64),
@@ -54,6 +59,7 @@ export const environmentSchema = z.strictObject({
 export type EnvironmentRecord = z.infer<typeof environmentSchema>;
 export const createEnvironmentSchema = z.strictObject({
   persistence: persistenceSchema.optional(),
+  execution: executionPreferenceSchema.optional(),
   name: z.string().trim().min(1).max(100).optional(),
   template: z.union([z.literal("general"), presetIdSchema]).optional(),
   tools: z.array(toolIdSchema).max(64).optional(),

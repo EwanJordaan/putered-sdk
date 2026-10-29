@@ -54,6 +54,16 @@ options override it. Use `environment.stop()` and `environment.resume()`, or let
 execution resume on demand. These APIs require the matching server and are not
 yet in npm 0.2.0. See the [SDK guide](docs/sdk.md).
 
+New environments use native execution by default. Set a default and optional
+per-program preferences in `putered.config.json`, for example
+`{ "execution": { "default": "native", "programs": { "git": "v8" } } }`.
+The values are `native`, `v8` or `auto`; an explicit top-level `execution`
+option on `environments.create()` overrides the config for that environment.
+This is separate from `settings.execution`, which controls the environment's
+execution security policy. Per-program preferences apply to direct `run()`
+commands; they do not select backends for programs launched inside an `exec()`
+shell script.
+
 Environment naming in this checkout is unreleased; npm version 0.2.0 does not
 yet accept the `name` option. Omit it when using that published version.
 

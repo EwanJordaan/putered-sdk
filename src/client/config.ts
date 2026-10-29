@@ -1,11 +1,12 @@
 import { closeSync, constants, fstatSync, openSync, readSync } from "node:fs";
 import { z } from "zod";
-import { environmentSettingsSchema } from "../tool-contract.js";
+import { environmentSettingsSchema, executionPreferenceSchema } from "../tool-contract.js";
 import { PuteredError } from "../errors.js";
 import { persistenceSchema } from "../persistence-contract.js";
 
 export const SDK_CONFIG_FILE = "putered.config.json";
-const schema = z.strictObject({ network: environmentSettingsSchema.shape.network, persistence: persistenceSchema.optional() });
+const schema = z.strictObject({ network: environmentSettingsSchema.shape.network, persistence: persistenceSchema.optional(),
+  execution: executionPreferenceSchema.optional() });
 export type SdkConfig = z.input<typeof schema>;
 
 /** One local config per SDK client. No ancestor/global config or remote file access. */
