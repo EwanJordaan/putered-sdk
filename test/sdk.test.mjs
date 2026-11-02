@@ -72,12 +72,26 @@ test('SDK accepts valid control-byte exec responses within actual stdout limits'
   assert.equal((await env.exec('echo test')).stdout.length, stdout.length);
 });
 
-test('schema conversion rejects regex flags, preserves UTF-16 length and validates JWT formats', async () => {
+test('schema conversion rejects regex flags, preserves Unicode length and validates JWT formats', async () => {
   for (const schema of [z.string().regex(/foo/i), z.object({ text: z.string().regex(/^a.b$/s) })])
     assert.throws(() => defineTool({ input: schema, output: z.string(), handler: () => '' }), error => error.code === 'PACKAGE_INVALID');
-  const tool = defineTool({ input: z.string().min(2), output: z.string().min(2), handler: text => text });
-  assert.equal(compileToolSchema(toolValidator(), tool.inputSchema)('🙂'), true);
-  assert.equal(await tool.run('🙂', { workspaceId: 'test', signal: new AbortController().signal }), '🙂');
+  const length = z.string().min(2).max(3);
+  const tool = defineTool({ input: length, output: length, handler: text => text });
+  assert.equal(tool.inputSchema.minLength, 2);
+  assert.equal(tool.inputSchema.maxLength, 3);
+  const context = { workspaceId: 'test', signal: new AbortController().signal };
+  for (const [value, valid] of [['', false], ['🙂', false], ['🙂a', true], ['🙂🙂🙂', true], ['🙂🙂🙂a', false]]) {
+    assert.equal(length.safeParse(value).success, valid);
+    for (const schema of [tool.inputSchema, tool.outputSchema])
+      assert.equal(compileToolSchema(toolValidator(), schema)(value), valid);
+    if (valid) assert.equal(await tool.run(value, context), value);
+    else await assert.rejects(tool.run(value, context), error => error.code === 'INVALID_INPUT');
+  }
+  // Previously published tools retain their UTF-16 wire keyword semantics.
+  const legacy = compileToolSchema(toolValidator(), { type: 'string', 'x-putered-minUtf16Length': 2, 'x-putered-maxUtf16Length': 2 });
+  assert.equal(legacy('🙂'), true);
+  assert.equal(legacy('a'), false);
+  assert.equal(legacy('🙂a'), false);
   for (const schema of [z.string().regex(/^.$/), z.string().regex(/^.$/).regex(/./)]) {
     const regex = defineTool({ input: schema, output: z.string(), handler: text => text });
     const validate = compileToolSchema(toolValidator(), regex.inputSchema);

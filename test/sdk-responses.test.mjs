@@ -8,6 +8,8 @@ import { Putered } from '../dist/client/sdk.js';
 import { assetId, ASSET_CHUNK_BYTES } from '../dist/asset-contract.js';
 import { presetId } from '../dist/preset-contract.js';
 import { MAX_BYTES } from '../dist/limits.js';
+import { defineTool } from '../dist/tool-definition.js';
+import { z } from 'zod';
 
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 const record = { id: 'env_test', tools: [], settings: {} };
@@ -87,7 +89,20 @@ test('tool list/use/call validate records, IDs, required output and the declared
   assert.equal((await sdk.tools.list())[0].id, toolId);
   const saved = await sdk.tools.use(toolId), env = await sdk.environments.create({ tools: [saved] });
   assert.deepEqual(await env.tools.call(saved, 'echo', 'input'), { output: 'echoed' });
-  for (const bad of [{}, { output: 5 }]) { output = bad; await assert.rejects(env.tools.call(saved, 'echo', 'input'), error => error.code === 'INVALID_OUTPUT'); }
+  output = {}; await assert.rejects(env.tools.call(saved, 'echo', 'input'), protocol);
+  output = { output: 5 }; await assert.rejects(env.tools.call(saved, 'echo', 'input'), error => error.code === 'INVALID_OUTPUT');
+  const length = z.string().min(2).max(3);
+  const definition = defineTool({ input: z.string(), output: length, handler: text => text });
+  const bounded = structuredClone(tool);
+  bounded.manifest.tools.echo.outputSchema = definition.outputSchema;
+  const unicode = client(async url => reply(String(url).endsWith('/tools/call') ? output : String(url).endsWith('/environments') ? { ...record, tools: [toolId] } : bounded));
+  const unicodeTool = await unicode.tools.use(toolId), unicodeEnv = await unicode.environments.create({ tools: [unicodeTool] });
+  for (const [value, valid] of [['🙂', false], ['🙂a', true], ['🙂🙂🙂', true], ['🙂🙂🙂a', false]]) {
+    output = { output: value };
+    assert.equal(length.safeParse(value).success, valid);
+    if (valid) assert.deepEqual(await unicodeEnv.tools.call(unicodeTool, 'echo', 'input'), output);
+    else await assert.rejects(unicodeEnv.tools.call(unicodeTool, 'echo', 'input'), error => error.code === 'INVALID_OUTPUT');
+  }
   await assert.rejects(client(async () => reply([{ ...tool, visibility: 'public' }])).tools.list(), protocol);
   await assert.rejects(client(async () => new Response(JSON.stringify([tool]).replace('"inputSchema":{"type":"string"}', '"inputSchema":{"maxLength":1e400}'))).tools.list(), protocol);
   await assert.rejects(client(async () => reply({ ...tool, id: 'tool_' + 'b'.repeat(64) })).tools.use(toolId), error => error.code === 'PACKAGE_INVALID');

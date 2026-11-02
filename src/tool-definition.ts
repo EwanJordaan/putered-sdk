@@ -71,17 +71,6 @@ function wireSchema(schema: z.ZodType, io: "input" | "output") {
     };
     preservePattern(jsonSchema);
     if (Array.isArray(jsonSchema.allOf)) for (const part of jsonSchema.allOf) preservePattern(part);
-    // Zod counts UTF-16 units; JSON Schema minLength/maxLength count code points.
-    if (jsonSchema.type === "string") {
-      if (jsonSchema.minLength !== undefined) {
-        jsonSchema["x-putered-minUtf16Length"] = jsonSchema.minLength;
-        delete jsonSchema.minLength;
-      }
-      if (jsonSchema.maxLength !== undefined) {
-        jsonSchema["x-putered-maxUtf16Length"] = jsonSchema.maxLength;
-        delete jsonSchema.maxLength;
-      }
-    }
   } }); } catch (error) {
     if (error instanceof PuteredError) throw error;
     throw new PuteredError("Tool schemas must be JSON-representable.", "PACKAGE_INVALID", { cause: error });

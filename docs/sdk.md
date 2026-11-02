@@ -16,7 +16,7 @@ console.log((await environment.exec('pwd')).output);
 // Later: await putered.environments.connect(environment.id)
 ```
 
-The unreleased SDK source supports an optional `name` when creating an environment. Names are trimmed and
+SDK 0.3.0 supports an optional `name` when creating an environment. Names are trimmed and
 must contain 1–100 characters after trimming. Read the returned value with
 `environment.name` or `environment.describe().name`; reconnecting preserves it.
 Omit `name` with published npm 0.2.0, which does not yet support this option.
@@ -89,8 +89,8 @@ Stop/resume restores files rather than running processes or RAM. Synthetic mount
 are excluded, and selected guest credentials are retained automatically unless
 excluded. Portable exports apply separate credential exclusions.
 
-These changes require the matching new SDK/server source; npm 0.2.0 does not have
-these APIs. See the server's [persistence guide](https://github.com/EwanJordaan/Putered/blob/main/docs/persistence.md)
+These APIs require SDK 0.3.0 and the matching server; SDK 0.2.0 does not have
+them. See the server's [persistence guide](https://github.com/EwanJordaan/Putered/blob/main/docs/persistence.md)
 for exact package directories, custom restore behavior and storage boundaries.
 
 Use `environment.run(program, args, options)` when the program and each argument
@@ -276,7 +276,8 @@ tool schemas infer handler parameters/results and SDK input/output types. Schema
 must be JSON-representable. Async JSON Schema validators are rejected; Zod parsing
 and handlers themselves can be asynchronous. Format constraints are validated.
 Hosted data must be finite JSON, not BigInt, Date, undefined or function values.
-String length and flag-free custom regex constraints preserve Zod's JS semantics.
+String length checks count Unicode code points, matching Zod (an emoji counts as
+one character). Flag-free custom regex constraints preserve JavaScript semantics.
 Regex flags are currently
 rejected at definition time, and unsupported JSON Schema formats fail explicitly.
 

@@ -9,7 +9,7 @@ Requires Node.js 22.13 or later.
 ## Install
 
 ```sh
-npm install @putered/sdk@0.2.0
+npm install @putered/sdk@0.3.0
 ```
 
 To build a local tarball instead:
@@ -51,8 +51,12 @@ Create environments with top-level `persistence: "workspace"`,
 `{ mode: "custom", include: [...], exclude: [...] }` policy. Set a default using
 `{ "persistence": "workspace" }` in `putered.config.json`; explicit creation
 options override it. Use `environment.stop()` and `environment.resume()`, or let
-execution resume on demand. These APIs require the matching server and are not
-yet in npm 0.2.0. See the [SDK guide](docs/sdk.md).
+execution resume on demand. These APIs are available in SDK 0.3.0 and require
+the matching server. See the [SDK guide](docs/sdk.md).
+
+Upgrading from 0.2.0: replace `settings.saveScope: "workspace-only"` with
+top-level `persistence: "workspace"`, or `"entire-environment"` with
+`persistence: "full"`. The old `saveScope` field is no longer accepted.
 
 New environments use native execution by default. Set a default and optional
 per-program preferences in `putered.config.json`, for example
@@ -64,8 +68,8 @@ execution security policy. Per-program preferences apply to direct `run()`
 commands; they do not select backends for programs launched inside an `exec()`
 shell script.
 
-Environment naming in this checkout is unreleased; npm version 0.2.0 does not
-yet accept the `name` option. Omit it when using that published version.
+SDK 0.3.0 accepts an optional `name` when creating an environment. Read it through
+`environment.name`; reconnect using the environment ID.
 
 ## Guides and examples
 
