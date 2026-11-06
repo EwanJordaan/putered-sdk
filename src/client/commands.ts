@@ -13,6 +13,8 @@ export const snapshotSchema = z.object({
   output: z.array(z.object({ stream: z.enum(["stdout", "stderr"]), data: z.string().max(87384) })).default([]),
   httpStatus: z.number().int().min(100).max(599).optional(), result: z.unknown().optional(), error: z.string().optional(),
 });
+type CommandSnapshot = z.infer<typeof snapshotSchema>;
+
 export const commandTicketSchema = z.object({ jobId: z.string().uuid(), state: z.literal("running"), commandPath: z.string().optional() });
 export type OutputChunk = { stream: "stdout" | "stderr"; data: string };
 export type OutputBytesChunk = { stream: "stdout" | "stderr"; data: Uint8Array };
@@ -25,12 +27,12 @@ function decodeBase64(value: string): Uint8Array {
   if (bytes.toString("base64") !== value) throw new PuteredError("Invalid command output bytes.", "PROTOCOL_ERROR");
   return bytes;
 }
-function validateCursor(value: z.infer<typeof snapshotSchema>, requestedCursor: number): void {
+function validateCursor(value: CommandSnapshot, requestedCursor: number): void {
   const outputBytes = value.output.reduce((total, item) => total + decodeBase64(item.data).byteLength, 0);
   if (value.cursor < requestedCursor || value.cursor < outputBytes || (!value.reset && value.cursor !== requestedCursor + outputBytes))
     throw new PuteredError("Invalid command output cursor.", "PROTOCOL_ERROR");
 }
-function commandFailure(snapshot: z.infer<typeof snapshotSchema>): never {
+function commandFailure(snapshot: CommandSnapshot): never {
   if (snapshot.state === "unknown") throw new PuteredError(snapshot.error ?? "Command outcome is unknown.", "CONFLICT");
   if (snapshot.state === "failed") {
     const saved = z.object({ error: z.string(), code: z.string().optional() }).safeParse(snapshot.result);
@@ -41,6 +43,13 @@ function commandFailure(snapshot: z.infer<typeof snapshotSchema>): never {
       });
   }
   throw new PuteredError("Command is still running.", "PROTOCOL_ERROR");
+}
+
+function savedCommandResult(value: unknown): CommandResult {
+  const result = execResultSchema.safeParse(value);
+  if (!result.success)
+    throw new PuteredError("Invalid saved command result.", "PROTOCOL_ERROR", { cause: result.error });
+  return commandResult(result.data, false);
 }
 
 /** A resumable command reference. Calls to wait/logs only inspect saved output; they never replay the command. */
@@ -109,26 +118,24 @@ export class CommandHandle {
     if (this.logsActive) throw new PuteredError("Only one logs() iterator may read a command at a time.", "CONFLICT");
     this.logsActive = true;
     try {
-    if (this.lostOutputHistory && !options.acceptTruncation) throw new PuteredError("Command output history was truncated; use logs({ acceptTruncation: true }) to continue with retained output.", "CONFLICT");
-    for (;;) {
-      options.signal?.throwIfAborted();
-      const value = await this.snapshot(options.signal, false, options.acceptTruncation === true);
-      this.lostOutputHistory = false;
-      if (value.reset) this.cursor = value.cursor - value.output.reduce((total, item) => total + decodeBase64(item.data).byteLength, 0);
-      for (const item of value.output) {
-        const data = decodeBase64(item.data);
-        this.cursor += data.byteLength;
-        yield { stream: item.stream, data };
+      if (this.lostOutputHistory && !options.acceptTruncation) throw new PuteredError("Command output history was truncated; use logs({ acceptTruncation: true }) to continue with retained output.", "CONFLICT");
+      for (;;) {
+        options.signal?.throwIfAborted();
+        const value = await this.snapshot(options.signal, false, options.acceptTruncation === true);
+        this.lostOutputHistory = false;
+        if (value.reset) this.cursor = value.cursor - value.output.reduce((total, item) => total + decodeBase64(item.data).byteLength, 0);
+        for (const item of value.output) {
+          const data = decodeBase64(item.data);
+          this.cursor += data.byteLength;
+          yield { stream: item.stream, data };
+        }
+        if (value.state === "completed") {
+          this._result = savedCommandResult(value.result);
+          return;
+        }
+        if (value.state === "failed" || value.state === "unknown") commandFailure(value);
+        await delay(250, undefined, { signal: options.signal });
       }
-      if (value.state === "completed") {
-        const result = execResultSchema.safeParse(value.result);
-        if (!result.success) throw new PuteredError("Invalid saved command result.", "PROTOCOL_ERROR", { cause: result.error });
-        this._result = commandResult(result.data, false);
-        return;
-      }
-      if (value.state === "failed" || value.state === "unknown") commandFailure(value);
-      await delay(250, undefined, { signal: options.signal });
-    }
     } finally { this.logsActive = false; }
   }
   async wait(options: { signal?: AbortSignal; check?: boolean } = {}): Promise<CommandResult> {
@@ -139,9 +146,7 @@ export class CommandHandle {
       const value = await this.snapshot(options.signal, false, true);
       if (value.state === "completed") {
         await this.outputPump;
-        const result = execResultSchema.safeParse(value.result);
-        if (!result.success) throw new PuteredError("Invalid saved command result.", "PROTOCOL_ERROR", { cause: result.error });
-        this._result = commandResult(result.data, false);
+        this._result = savedCommandResult(value.result);
         if (this.inputFailure !== undefined) throw this.inputFailure;
         if (this.outputFailure !== undefined) throw this.outputFailure;
         if ((options.check ?? true) && this._result.exitCode !== 0) throw new CommandError(this._result);
@@ -153,26 +158,23 @@ export class CommandHandle {
   }
   async writeStdin(input: string | Uint8Array): Promise<void> {
     if (this.stdinOpen === false) throw new PuteredError("Command stdin is closed.", "CONFLICT");
-    const bytes = typeof input === "string" ? Buffer.from(input) : Buffer.from(input);
+    const bytes = Buffer.from(input);
     if (!bytes.byteLength || bytes.byteLength > 32 * 1024) throw new PuteredError("Each stdin write must contain 1 to 32 KiB.", "INVALID_INPUT");
-    await this.enqueueInput(async () => {
-      const result = await this.transport.request(`${this.path}/input`, "POST", z.object({ nextSequence: z.number().int().positive() }), {
-        sequence: this.nextInputSequence, input: bytes.toString("base64"),
-      });
-      if (result.nextSequence < this.nextInputSequence + 1) throw new PuteredError("Invalid command input sequence response.", "PROTOCOL_ERROR");
-      this.nextInputSequence = result.nextSequence;
-      this.stdinOpen = true;
-    });
+    await this.sendInput({ input: bytes.toString("base64") }, true);
   }
   async closeStdin(): Promise<void> {
     if (this.stdinOpen === false) throw new PuteredError("Command stdin is already closed.", "CONFLICT");
-    await this.enqueueInput(async () => {
-      const result = await this.transport.request(`${this.path}/input`, "POST", z.object({ nextSequence: z.number().int().positive() }), {
-        sequence: this.nextInputSequence, close: true,
-      });
-      if (result.nextSequence < this.nextInputSequence + 1) throw new PuteredError("Invalid command input sequence response.", "PROTOCOL_ERROR");
+    await this.sendInput({ close: true }, false);
+  }
+  private sendInput(value: { input: string } | { close: true }, stdinOpen: boolean): Promise<void> {
+    return this.enqueueInput(async () => {
+      const result = await this.transport.request(`${this.path}/input`, "POST",
+        z.object({ nextSequence: z.number().int().positive() }),
+        { sequence: this.nextInputSequence, ...value });
+      if (result.nextSequence < this.nextInputSequence + 1)
+        throw new PuteredError("Invalid command input sequence response.", "PROTOCOL_ERROR");
       this.nextInputSequence = result.nextSequence;
-      this.stdinOpen = false;
+      this.stdinOpen = stdinOpen;
     });
   }
   async kill(signal: CommandSignal = "SIGTERM"): Promise<void> {
@@ -212,14 +214,9 @@ export async function loadCommandHandle(transport: Transport, environmentId: str
 
 export async function pipeCommand(handle: CommandHandle, options: { stdin?: string | Uint8Array | Readable | true;
   stdout?: Writable; stderr?: Writable; signal?: AbortSignal }): Promise<CommandResult> {
-  const pumpInput = async () => {
-    if (options.stdin instanceof Readable) {
-      await pumpCommandInput(handle, options.stdin);
-    } else if (options.stdin === true) { /* caller owns stdin */ }
-    // Text and byte stdin was included in the submission body and is already closed.
-  };
   try {
-    await Promise.all([pumpInput(), pumpCommandOutput(handle, options.stdout, options.stderr, options.signal)]);
+    const input = options.stdin instanceof Readable ? pumpCommandInput(handle, options.stdin) : undefined;
+    await Promise.all([input, pumpCommandOutput(handle, options.stdout, options.stderr, options.signal)]);
     if (!handle.result) await handle.wait();
     return handle.result!;
   } catch (error) {
@@ -238,8 +235,8 @@ export async function pumpCommandOutput(handle: CommandHandle, stdout?: Writable
       const finish = (error?: Error | null) => {
         if (settled) return;
         settled = true;
-          if (error) setImmediate(() => sink.removeListener("error", onError));
-          else sink.removeListener("error", onError);
+        if (error) setImmediate(() => sink.removeListener("error", onError));
+        else sink.removeListener("error", onError);
         error ? reject(error) : resolve();
       };
       const onError = (error: Error) => finish(error);
