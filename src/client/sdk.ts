@@ -28,6 +28,8 @@ import { loadSdkConfig, type SdkConfig } from "./config.js";
 import { DEFAULT_INTERNET_BYTES, preservesNetworkRules } from "../network-policy.js";
 import { persistenceSchema, samePersistence, type Persistence } from "../persistence-contract.js";
 export type { Persistence } from "../persistence-contract.js";
+import { redactOutboundPolicy, updateEnvironmentSchema, type OutboundPolicy } from "../outbound-policy.js";
+export type { OutboundPolicy } from "../outbound-policy.js";
 import { environmentResponseSchema, storedToolResponseSchema, execResultSchema, toolCallResponseSchema } from "./responses.js";
 export type { SdkConfig } from "./config.js";
 export type { InternetPolicy, NetworkRuntime } from "../network-policy.js";
@@ -140,6 +142,14 @@ export class Environment {
   get persistence(): Persistence {
     return structuredClone(this.record.persistence ?? "full");
   }
+  /** Environment variables stored with this environment. */
+  get env(): DeepReadonly<Record<string, string>> | undefined {
+    return this.record.env === undefined ? undefined : freezeRecord(structuredClone(this.record.env));
+  }
+  /** Outbound request policy stored with this environment; transformed header values may be redacted. */
+  get networkPolicy(): DeepReadonly<OutboundPolicy> | undefined {
+    return this.record.networkPolicy === undefined ? undefined : freezeRecord(structuredClone(this.record.networkPolicy));
+  }
   capturePreset(options: CapturePresetOptions) {
     return capturePreset(this.transport, this.id, options);
   }
@@ -160,6 +170,18 @@ export class Environment {
     if (!samePersistence(this.persistence, record.persistence ?? "full"))
       throw new PuteredError("Resume response changed the environment's persistence policy.", "PROTOCOL_ERROR");
     return new Environment(this.transport, record);
+  }
+  /** Replace stored environment variables and/or outbound request policy. */
+  async update(value: z.input<typeof updateEnvironmentSchema>, options: { signal?: AbortSignal } = {}): Promise<this> {
+    const request = inputContract(updateEnvironmentSchema, value);
+    const record = await this.transport.request(`/environments/${this.id}`, "PATCH", environmentResponseSchema, request, options.signal);
+    if (record.id !== this.id) throw new PuteredError("Environment response identity mismatch.", "PROTOCOL_ERROR");
+    if (request.env !== undefined && canonical(record.env ?? null) !== canonical(request.env))
+      throw new PuteredError("Environment response does not preserve the requested environment variables.", "PROTOCOL_ERROR");
+    if (request.networkPolicy !== undefined && canonical(record.networkPolicy ?? null) !== canonical(redactOutboundPolicy(request.networkPolicy)))
+      throw new PuteredError("Environment response does not preserve the requested outbound network policy.", "PROTOCOL_ERROR");
+    Object.assign(this.record, record);
+    return this;
   }
   /** Permanently delete this environment and its stored workspace data. */
   async delete(options: { signal?: AbortSignal } = {}): Promise<{ id: string; deleted: true }> {
@@ -280,6 +302,10 @@ export interface EnvironmentOptions {
   template?: string;
   tools?: readonly ToolReference<ToolMap | null>[];
   settings?: z.input<typeof createEnvironmentSchema>["settings"];
+  /** Environment variables stored for commands in this environment. */
+  env?: z.input<typeof createEnvironmentSchema>["env"];
+  /** Outbound HTTP request policy for this environment. */
+  networkPolicy?: z.input<typeof createEnvironmentSchema>["networkPolicy"];
 }
 export class Putered {
   readonly tools: Tools;
@@ -316,7 +342,7 @@ export class Putered {
     this.environments = {
       create: async (value = {}) => {
         if (!value || typeof value !== "object" || Array.isArray(value) ||
-            Object.keys(value).some(key => !["name", "template", "tools", "settings", "persistence", "execution"].includes(key)))
+            Object.keys(value).some(key => !["name", "template", "tools", "settings", "persistence", "execution", "env", "networkPolicy"].includes(key)))
           throw new PuteredError("Unknown or invalid environment creation option.", "INVALID_INPUT");
         const persistence = value.persistence === undefined ? config.persistence
           : inputContract(persistenceSchema, value.persistence);
@@ -332,6 +358,8 @@ export class Putered {
           ...(value.template === undefined ? {} : { template: value.template }),
           ...(value.tools === undefined ? {} : { tools: value.tools.map(tool => tool.id) }),
           settings: { ...value.settings, ...(network === undefined ? {} : { network }) },
+          ...(value.env === undefined ? {} : { env: value.env }),
+          ...(value.networkPolicy === undefined ? {} : { networkPolicy: value.networkPolicy }),
         });
         checkNetwork(request.settings?.network);
         const record = await transport.request("/environments", "POST", environmentResponseSchema, request);
@@ -343,6 +371,10 @@ export class Putered {
           throw new PuteredError("Environment response does not preserve the requested execution preference.", "PROTOCOL_ERROR");
         if (request.name !== undefined && record.name !== request.name)
           throw new PuteredError("Environment response does not match the requested name.", "PROTOCOL_ERROR");
+        if (request.env !== undefined && canonical(record.env ?? null) !== canonical(request.env))
+          throw new PuteredError("Environment response does not preserve the requested environment variables.", "PROTOCOL_ERROR");
+        if (request.networkPolicy !== undefined && canonical(record.networkPolicy ?? null) !== canonical(redactOutboundPolicy(request.networkPolicy)))
+          throw new PuteredError("Environment response does not preserve the requested outbound network policy.", "PROTOCOL_ERROR");
         if (request.tools && canonical([...new Set(request.tools)].sort()) !== canonical([...record.tools].sort()))
           throw new PuteredError("Environment response does not match the requested tools.", "PROTOCOL_ERROR");
         for (const key of ["git", "execution", "timeoutMs"] as const)

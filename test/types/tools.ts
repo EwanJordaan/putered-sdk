@@ -1,4 +1,4 @@
-import { Putered, PuteredError, type CommandHandle, type ExecResult, type ErrorCode, type RunOptions } from "@putered/sdk";
+import { Putered, PuteredError, type CommandHandle, type ExecResult, type ErrorCode, type RunOptions, type OutboundPolicy } from "@putered/sdk";
 import { definePlugin, defineTool, defineAsset } from "@putered/sdk/plugins";
 import { z } from "zod";
 
@@ -23,6 +23,17 @@ const invalidCode: ErrorCode = "SOMETHING_RANDOM";
 const client = new Putered({ baseUrl: "http://localhost:3000", apiKey: "x".repeat(32) });
 const ref = await client.tools.use(plugin);
 const environment = await client.environments.create({ name: "word-counter", tools: [ref] });
+const outboundPolicy: OutboundPolicy = { allow: { "api.vercel.com": [
+  { match: { path: { startsWith: "/v1/deployments" }, method: ["GET", "POST"] },
+    transform: [{ headers: { Authorization: "Bearer dummy-vercel-token" } }] },
+  { response: { statusCode: 403 } },
+] } };
+const protectedEnvironment = await client.environments.create({
+  env: { VERCEL_TOKEN: "dummy-vercel-token", VERCEL_TEAM_ID: "team_demo" }, networkPolicy: outboundPolicy,
+});
+await protectedEnvironment.update({ networkPolicy: outboundPolicy });
+const readonlyPolicy: typeof protectedEnvironment.networkPolicy = protectedEnvironment.networkPolicy;
+void readonlyPolicy;
 const environmentName: string | undefined = environment.name;
 const describedName: string | undefined = environment.describe().name;
 void environmentName; void describedName;

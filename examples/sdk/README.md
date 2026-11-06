@@ -60,6 +60,36 @@ Run a file with `npm run example -- <file>`. Set the listed variables first.
 | [11-delete-environment.ts](11-delete-environment.ts) | Permanently delete an environment with an explicit confirmation. | `PUTERED_ENVIRONMENT_ID`, `PUTERED_CONFIRM_DELETE` set to that same ID | Deletes the chosen environment. |
 | [12-stream-and-detach.ts](12-stream-and-detach.ts) | Set cwd/env, pipe stdin and stdout, then collect a detached command by ID. | None | Deletes its environment. |
 
+Create an environment with Vercel variables and an outbound policy that adds an
+authorization header only for selected deployment requests. The final rule
+returns 403 when no earlier path and method rule matches. Use dummy values in
+examples and source files; supply real credentials through your own secret
+management flow.
+
+```ts
+const environment = await client.environments.create({
+  env: { VERCEL_TOKEN: 'dummy-vercel-token', VERCEL_TEAM_ID: 'team_demo' },
+  networkPolicy: {
+    allow: {
+      'api.vercel.com': [
+        {
+          match: { path: { startsWith: '/v1/deployments' }, method: ['GET', 'POST'] },
+          transform: [{ headers: { Authorization: 'Bearer dummy-vercel-token' } }],
+        },
+        { response: { statusCode: 403 } },
+      ],
+    },
+  },
+});
+
+await environment.update({ env: { VERCEL_TOKEN: 'dummy-vercel-token', VERCEL_TEAM_ID: 'team_demo' } });
+```
+
+`environment.env` and `environment.networkPolicy` expose the stored values;
+transformed header values may be returned as `'<redacted>'`. `update()` accepts
+`env`, `networkPolicy`, or both, and refreshes `describe()` after the server
+confirms the environment identity and requested values.
+
 For example, after running 01 in PowerShell:
 
 ```powershell

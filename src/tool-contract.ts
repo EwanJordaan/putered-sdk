@@ -5,6 +5,7 @@ import { assetReferenceSchema } from "./asset-contract.js";
 import { presetIdSchema } from "./preset-contract.js";
 import { persistenceSchema } from "./persistence-contract.js";
 import { internetPolicySchema } from "./network-policy.js";
+import { environmentVariablesSchema, outboundPolicySchema, outboundPolicyWriteSchema } from "./outbound-policy.js";
 
 const name = z.string().refine(validName);
 const schema = z.record(z.string(), z.unknown());
@@ -55,6 +56,8 @@ export const environmentSchema = z.strictObject({
   tools: z.array(toolIdSchema).max(64),
   settings: environmentSettingsSchema,
   template: presetIdSchema.optional(),
+  env: environmentVariablesSchema.optional(),
+  networkPolicy: outboundPolicySchema.optional(),
 });
 export type EnvironmentRecord = z.infer<typeof environmentSchema>;
 export const createEnvironmentSchema = z.strictObject({
@@ -64,6 +67,8 @@ export const createEnvironmentSchema = z.strictObject({
   template: z.union([z.literal("general"), presetIdSchema]).optional(),
   tools: z.array(toolIdSchema).max(64).optional(),
   settings: environmentSettingsSchema.optional(),
+  env: environmentVariablesSchema.optional(),
+  networkPolicy: outboundPolicyWriteSchema.optional(),
 });
 export const callOptionsSchema = z.strictObject({
   wait: z.literal(true).optional(),

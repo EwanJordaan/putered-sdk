@@ -40,9 +40,10 @@ curl https://putered.com/api/compute/v1/environments \
 
 | Method and path | Request | Success |
 | --- | --- | --- |
-| `POST /environments` | Website: `{ "name"?: string, "template"?: "general" \| "preset_<sha256>", "settings"?: EnvironmentSettings }`. Direct server: `{ "template"?: "general" \| "preset_<sha256>", "tools"?: [toolId], "settings"?: EnvironmentSettings }`. | `201 Environment`; website includes `name`, direct does not. |
+| `POST /environments` | Website: `{ "name"?: string, "template"?: "general" \| "preset_<sha256>", "settings"?: EnvironmentSettings, "env"?: EnvironmentVariables, "networkPolicy"?: OutboundPolicy }`. Direct server: `{ "template"?: "general" \| "preset_<sha256>", "tools"?: [toolId], "settings"?: EnvironmentSettings, "env"?: EnvironmentVariables, "networkPolicy"?: OutboundPolicy }`. | `201 Environment`; website includes `name`, direct does not. |
 | `GET /environments` | No body. Website only. | `200 [ { id, name, created_at } ]` (account records, newest first). Direct core has no collection route. |
 | `GET /environments/{id}` | No body. | `200 Environment`; website includes `name`. |
+| `PATCH /environments/{id}` | `{ "env"?: EnvironmentVariables, "networkPolicy"?: OutboundPolicy }`; at least one field is required. | `200 Environment` with the updated record. |
 | `DELETE /environments/{id}` | No body. Website and direct. | `200 { "id": "…", "deleted": true }`. |
 | `POST /environments/{id}/exec` | `{ "command": string, "timeoutMs"?: 1..300000 }`. Website rejects blank or >64 KiB commands and extra fields (including SDK `wait`). Direct core also accepts optional `metered` when configured and `wait: true` as a call option; it still responds synchronously. | `200 ExecutionResult` (sync). On website, `?async=1` may return a ticket; see below. |
 | `POST /environments/{id}/run` | `{ "program": string, "args"?: string[], "timeoutMs"?: 1..300000, "wait"?: true }`. Program matches `^[a-z][a-z0-9_-]{0,63}$`; args default to `[]`, contain no NUL, are limited to 4096 entries and 64 KiB encoded JSON total. Extra fields are rejected. | `200 ExecutionResult` (sync). On website, `?async=1` may return a ticket; see below. |
@@ -79,6 +80,15 @@ Environment wire example:
   "name": "Demo"
 }
 ```
+
+`EnvironmentVariables` is a map from POSIX-style variable names to NUL-free
+strings, limited to 64 KiB encoded JSON. Authored `OutboundPolicy` values are
+limited to 64 KiB encoded JSON; policy readback can reach 256 KiB after header
+values are redacted. `OutboundPolicy` is `"allow-all"`,
+`"deny-all"`, a list of allowed host patterns, or a host-to-rules map. Rules
+may match exact or prefix paths and HTTP methods before adding outbound headers;
+an unmatched request can use a `{ "response": { "statusCode": 403 } }` rule.
+Readback may replace transformed header values with `"<redacted>"`.
 
 Execution response is the server's actual result object; `output` is **not** a JSON field:
 
