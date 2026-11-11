@@ -10,6 +10,7 @@ async function fixture(reply) {
   const client = new Putered({ baseUrl: 'https://putered.invalid', apiKey: 'x'.repeat(32), config: {}, fetch: async (url, options) => {
     requests.push({ url, options });
     if (url.endsWith('/environments/' + id)) return Response.json({ id, tools: [], settings: {} });
+    if (url.endsWith('/signal')) return Response.json({ id: jobId, environmentId: id, state: 'running', createdAt: 1, cursor: 0, output: [] });
     if (options.method === 'POST') return Response.json({ jobId, state: 'running' }, { status: 202 });
     return reply(requests);
   } });
@@ -44,11 +45,14 @@ test('async results validate identity, payload, unknown outcomes and upstream fa
   assert.equal(requests.filter(r => r.options.method === 'POST').length, 1);
 });
 
-test('async cancellation stops polling, preserves execution ID and never cancels by replay', async () => {
+test('async cancellation signals the submitted command and never replays execution', async () => {
   const controller = new AbortController();
   const { env, requests } = await fixture(() => { controller.abort(); return Response.json({ id: jobId, environmentId: id, state: 'running' }); });
   await assert.rejects(env.exec('echo hello', { async: true, signal: controller.signal }), error => error.code === 'CANCELLED' && error.status === 499 && error.message.includes(jobId));
-  assert.equal(requests.filter(r => r.options.method === 'POST').length, 1);
+  const posts = requests.filter(r => r.options.method === 'POST');
+  assert.equal(posts.length, 2);
+  assert.ok(posts[1].url.endsWith('/signal'));
+  assert.deepEqual(JSON.parse(posts[1].options.body), { signal: 'SIGKILL' });
 });
 
 test('direct servers returning an ordinary result remain compatible with opt-in async execution', async () => {

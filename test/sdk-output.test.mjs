@@ -45,3 +45,13 @@ test('nonzero commands reject exec with output and permit explicit unchecked res
     assert.equal(command.output,'build failed\n');assert.equal(command.exitCode,2);
   }
 });
+
+test('memory limit failures expose a clear CommandError and top-level usage flag', async () => {
+  const failed = { ...data, exitCode: 137, memoryLimitExceeded: true };
+  const sdk = new Putered({ baseUrl: 'https://putered.invalid', apiKey: 'x'.repeat(32), config: {}, fetch: async (_url, options) =>
+    Response.json(options.method === 'POST' ? failed : environment) });
+  const env = await sdk.environments.connect(environment.id);
+  await assert.rejects(env.exec('large', { check: true }), error =>
+    error instanceof CommandError && /exceeded its memory limit/.test(error.message) && error.result.memoryLimitExceeded === true);
+  assert.equal((await env.exec('large', { check: false })).memoryLimitExceeded, true);
+});

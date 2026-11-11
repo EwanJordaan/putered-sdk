@@ -180,7 +180,8 @@ await terminal.stop(); // Ends compute and waits for the durable workspace save.
 
 Keep the returned `cursor` for the next read. Reads maintain the connection;
 one-hour sessions stop after five minutes without input or 45 seconds without
-a reader. CPU/RAM are charged while allocated, including an idle shell. Full OS
+a reader. CPU is billed for measured usage; RAM is billed for its allocated ceiling while
+the shell exists, including when idle. Full OS
 configuration requires an OCI environment and an Entire environment snapshot.
 `environment.terminals.connect(id)` reconnects to an existing owned session.
 
@@ -194,9 +195,43 @@ methods; see [the OCI preset API contract](api-contract.md#assets-tools-and-oci-
 ## SDK config
 
 `putered.config.json` is read from the client process working directory.
-The SDK accepts only a `network` policy, validates the file before making
-requests, and rejects malformed, oversized, missing explicit paths and unknown
-settings. Omitting the file allows the server defaults. A configured offline
+The SDK validates the file before making requests, and rejects malformed,
+oversized, missing explicit paths and unknown settings. It accepts `network`,
+`persistence`, `execution`, and `resources`. Resource defaults are applied when
+creating an environment; on connect they fill resource fields missing from the
+saved environment settings. Saved settings keep precedence. Resource requests
+support CPU from 0.25 to 8 in 0.25 increments and memory from 256 to 8192 MiB
+in 256 MiB increments. Hosted requests also obey plan limits: Plus up to 2 vCPU /
+2048 MiB, Pro up to 8 vCPU / 8192 MiB. Currently available sizes are capped at
+1 vCPU / 1024 MiB; larger requests are rejected rather than queued indefinitely.
+These options require the matching SDK and server builds.
+
+For example, save defaults in `putered.config.json`:
+
+```json
+{
+  "resources": { "cpu": 0.5, "memoryMiB": 512 }
+}
+```
+
+Precedence is per-call fields, then saved environment fields, then config fields,
+then server defaults. Per-call `resources` can override either field:
+
+```ts
+await environment.exec('make', {
+  resources: { cpu: 1 },
+  queueTimeoutMs: 30000,
+  timeoutMs: 120000,
+});
+```
+
+CPU is shared fairly under contention, up to the selected maximum; there is no
+guaranteed minimum share. RAM is a hard ceiling and does not grow automatically.
+Work queues until its RAM allocation fits. Queue wait
+defaults to 120 seconds on the server and `queueTimeoutMs` accepts 1–300000 ms;
+`timeoutMs` continues to limit execution after allocation. Queued time is not
+billed. After a lost response, inspect the command ID before retrying; the SDK
+never silently replays a command. A configured offline
 policy cannot be overridden by an environment create request.
 
 ## Command output and long public API requests

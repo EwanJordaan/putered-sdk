@@ -43,8 +43,10 @@ const duration = z.number().nonnegative();
 export const execResultSchema = z.object({
   stdout: z.string().max(MAX_BYTES), stdoutBase64: z.string().max(Math.ceil(MAX_BYTES / 3) * 4), stderr: z.string().max(MAX_BYTES),
   exitCode: z.number().int(), durationMs: duration, hostDurationMs: duration,
+  memoryLimitExceeded: z.boolean().optional(),
   allocationUsage: z.object({ enforced: z.literal(true), durationMs: count,
-    cpuQuotaMicros: z.number().int().positive(), memoryBytes: z.number().int().positive() }).optional(),
+    cpuQuotaMicros: z.number().int().positive(), memoryBytes: z.number().int().positive(),
+    cpuMicros: count.optional() }).optional(),
   networkUsage: z.object({ sentBytes: count, receivedBytes: count, connections: count, limitBytes: count }).optional(),
   gitMetrics: z.array(z.object({ durationMs: duration, wasmMemoryBytes: count, helperCount: count })).optional(),
   pythonMetrics: z.object({

@@ -1,12 +1,12 @@
 import { z } from "zod";
 import { Readable, Writable } from "node:stream";
-import { runCommandSchema, type EnvironmentRecord } from "../tool-contract.js";
+import { runCommandSchema, resourcesSchema, type EnvironmentRecord } from "../tool-contract.js";
 import { canonical, freezeRecord, type DeepReadonly } from "../tool-definition.js";
 import { PuteredError } from "../errors.js";
 import { samePersistence, type Persistence } from "../persistence-contract.js";
 import { redactOutboundPolicy, updateEnvironmentSchema, type OutboundPolicy } from "../outbound-policy.js";
 import type { Transport } from "./transport.js";
-import { callOptions, inputContract, type CallOptions } from "./input-contract.js";
+import { callOptions, inputContract, mergeResources, type CallOptions } from "./input-contract.js";
 import { asyncExecution } from "./execution.js";
 import { commandResult, type CommandResult } from "./command-output.js";
 import {
@@ -42,10 +42,11 @@ export class Environment {
   readonly terminals: EnvironmentTerminals;
   readonly tools: EnvironmentTools;
   readonly id: string;
-  constructor(private readonly transport: Transport, private readonly record: EnvironmentRecord) {
+  constructor(private readonly transport: Transport, private readonly record: EnvironmentRecord,
+    private readonly configResources?: z.infer<typeof resourcesSchema>) {
     this.id = record.id;
     this.terminals = new EnvironmentTerminals(transport, record.id);
-    this.tools = new EnvironmentTools(transport, record);
+    this.tools = new EnvironmentTools(transport, record, configResources);
   }
   /** Display name returned by Putered; older records may omit it. */
   get name(): string | undefined { return this.record.name; }
@@ -60,6 +61,10 @@ export class Environment {
   /** Outbound request policy stored with this environment; transformed header values may be redacted. */
   get networkPolicy(): DeepReadonly<OutboundPolicy> | undefined {
     return this.record.networkPolicy === undefined ? undefined : freezeRecord(structuredClone(this.record.networkPolicy));
+  }
+  private executionOptions(options: CallOptions) {
+    const resources = mergeResources(this.configResources, this.record.settings.resources, options.resources);
+    return callOptions({ ...options, ...(Object.keys(resources).length ? { resources } : {}) });
   }
   capturePreset(options: CapturePresetOptions) {
     return capturePreset(this.transport, this.id, options);
@@ -80,7 +85,7 @@ export class Environment {
     if (record.id !== this.id) throw new PuteredError("Environment response identity mismatch.", "PROTOCOL_ERROR");
     if (!samePersistence(this.persistence, record.persistence ?? "full"))
       throw new PuteredError("Resume response changed the environment's persistence policy.", "PROTOCOL_ERROR");
-    return new Environment(this.transport, record);
+    return new Environment(this.transport, record, this.configResources);
   }
   /** Replace stored environment variables and/or outbound request policy. */
   async update(value: z.input<typeof updateEnvironmentSchema>, options: { signal?: AbortSignal } = {}): Promise<this> {
@@ -111,7 +116,7 @@ export class Environment {
     const input = {
       command,
       ...recoveryOptions(options),
-      ...callOptions(options),
+      ...this.executionOptions(options),
     };
     const result = options.async || options.requestId !== undefined
       ? await asyncExecution(this.transport, this.id, input, options.signal)
@@ -157,7 +162,7 @@ export class Environment {
     const input = {
       ...command,
       ...recoveryOptions(options),
-      ...callOptions(options),
+      ...this.executionOptions(options),
     };
     const interactive = options.detached === true || options.stdout !== undefined || options.stderr !== undefined ||
       openStdin || (options.stdin !== undefined && !stdinBytes);

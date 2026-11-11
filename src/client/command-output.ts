@@ -12,7 +12,9 @@ export class CommandError extends PuteredError {
   readonly exitCode: number;
   readonly result: CommandResult;
   constructor(result: CommandResult) {
-    super(`Command exited with code ${result.exitCode}.`, "EXECUTION_FAILED");
+    super(result.memoryLimitExceeded
+      ? `Command exceeded its memory limit (exit code ${result.exitCode}).`
+      : `Command exited with code ${result.exitCode}.`, "EXECUTION_FAILED");
     this.name = "CommandError";
     this.output = result.stdout + result.stderr;
     this.stdout = result.stdout;

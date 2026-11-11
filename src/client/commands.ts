@@ -8,6 +8,7 @@ import { execResultSchema } from "./responses.js";
 
 export const snapshotSchema = z.object({
   id: z.string().uuid(), environmentId: z.string(), state: z.enum(["running", "completed", "failed", "unknown"]),
+  phase: z.enum(["queued", "running"]).optional(),
   createdAt: z.number(), cursor: z.number().int().nonnegative(), program: z.string().optional(),
   nextSequence: z.number().int().nonnegative().optional(), stdinOpen: z.boolean().optional(), reset: z.literal(true).optional(),
   output: z.array(z.object({ stream: z.enum(["stdout", "stderr"]), data: z.string().max(87384) })).default([]),
@@ -15,7 +16,7 @@ export const snapshotSchema = z.object({
 });
 type CommandSnapshot = z.infer<typeof snapshotSchema>;
 
-export const commandTicketSchema = z.object({ jobId: z.string().uuid(), state: z.literal("running"), commandPath: z.string().optional() });
+export const commandTicketSchema = z.object({ jobId: z.string().uuid(), state: z.literal("running"), phase: z.enum(["queued", "running"]).optional(), commandPath: z.string().optional() });
 export type OutputChunk = { stream: "stdout" | "stderr"; data: string };
 export type OutputBytesChunk = { stream: "stdout" | "stderr"; data: Uint8Array };
 export interface LogOptions { signal?: AbortSignal; acceptTruncation?: boolean }

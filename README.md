@@ -71,6 +71,12 @@ shell script.
 SDK 0.3.0 accepts an optional `name` when creating an environment. Read it through
 `environment.name`; reconnect using the environment ID.
 
+Save compute defaults in `putered.config.json` with
+`{ "resources": { "cpu": 0.5, "memoryMiB": 512 } }`, and override either field
+through the `resources` option on individual executions. CPU shares under load;
+RAM stays capped. Current hosted sizes stop at 1 vCPU / 1024 MiB. This requires
+matching SDK and server builds; see the [SDK guide](docs/sdk.md).
+
 ## Guides and examples
 
 - [SDK guide](docs/sdk.md)
