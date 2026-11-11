@@ -4,16 +4,19 @@ import { ERROR_CODES, PuteredError, codeForStatus } from "../errors.js";
 import { execResultSchema } from "./responses.js";
 import type { Transport } from "./transport.js";
 import { commandTicketSchema, snapshotSchema, validateCommandPath } from "./commands.js";
+import type { CallOptions } from "./input-contract.js";
 
 const jobSchema = z.object({
   id: z.string().uuid(), environmentId: z.string(), state: z.enum(["running", "completed", "failed", "unknown"]),
+  phase: z.enum(["queued", "running"]).optional(),
   httpStatus: z.number().int().min(100).max(599).optional(), result: z.unknown().optional(), error: z.string().optional(),
 });
 
 /** Submit exactly once. Polling reads the saved result; it never replays execution. */
 export async function asyncExecution(transport: Transport, environmentId: string,
-  input: { command: string; timeoutMs?: number; wait?: true; requestId?: string } | ({ program: string; args: string[] } & { timeoutMs?: number; wait?: true; requestId?: string }),
-  signal?: AbortSignal, endpoint: "exec" | "run" = "exec", cancelOnAbort = false): Promise<z.infer<typeof execResultSchema>> {
+  input: ({ command: string; requestId?: string } | { program: string; args: string[]; requestId?: string }) &
+    Pick<CallOptions, "timeoutMs" | "wait" | "resources" | "queueTimeoutMs">,
+  signal?: AbortSignal, endpoint: "exec" | "run" = "exec", cancelOnAbort = true): Promise<z.infer<typeof execResultSchema>> {
   const accepted = await transport.request(`/environments/${environmentId}/${endpoint}?async=1`, "POST",
     z.union([commandTicketSchema, execResultSchema]), input, signal);
   // Direct core servers may return their ordinary result instead of a job ticket.

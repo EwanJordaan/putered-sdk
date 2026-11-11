@@ -45,14 +45,14 @@ curl https://putered.com/api/compute/v1/environments \
 | `GET /environments/{id}` | No body. | `200 Environment`; website includes `name`. |
 | `PATCH /environments/{id}` | `{ "env"?: EnvironmentVariables, "networkPolicy"?: OutboundPolicy }`; at least one field is required. | `200 Environment` with the updated record. |
 | `DELETE /environments/{id}` | No body. Website and direct. | `200 { "id": "…", "deleted": true }`. |
-| `POST /environments/{id}/exec` | `{ "command": string, "timeoutMs"?: 1..300000 }`. Website rejects blank or >64 KiB commands and extra fields (including SDK `wait`). Direct core also accepts optional `metered` when configured and `wait: true` as a call option; it still responds synchronously. | `200 ExecutionResult` (sync). On website, `?async=1` may return a ticket; see below. |
-| `POST /environments/{id}/run` | `{ "program": string, "args"?: string[], "timeoutMs"?: 1..300000, "wait"?: true }`. Program matches `^[a-z][a-z0-9_-]{0,63}$`; args default to `[]`, contain no NUL, are limited to 4096 entries and 64 KiB encoded JSON total. Extra fields are rejected. | `200 ExecutionResult` (sync). On website, `?async=1` may return a ticket; see below. |
-| `POST /environments/{id}/tools/call` | Direct server only: `{ "id": toolId, "tool": string, "input": any, "timeoutMs"?: 1..300000, "wait"?: true }`. | `200 { "output": any }`. |
+| `POST /environments/{id}/exec` | `{ "command": string, "resources"?: Resources, "queueTimeoutMs"?: 1..300000, "timeoutMs"?: 1..300000 }`. Website rejects blank or >64 KiB commands and extra fields (including SDK `wait`). Direct core also accepts optional `metered` when configured and `wait: true` as a call option. | `200 ExecutionResult` (sync); website and direct core support `?async=1` returning a command ticket; see below. |
+| `POST /environments/{id}/run` | `{ "program": string, "args"?: string[], "resources"?: Resources, "queueTimeoutMs"?: 1..300000, "timeoutMs"?: 1..300000, "wait"?: true }`. Program matches `^[a-z][a-z0-9_-]{0,63}$`; args default to `[]`, contain no NUL, are limited to 4096 entries and 64 KiB encoded JSON total. Extra fields are rejected. | `200 ExecutionResult` (sync); website and direct core support `?async=1` returning a command ticket; see below. |
+| `POST /environments/{id}/tools/call` | Direct server only: `{ "id": toolId, "tool": string, "input": any, "resources"?: Resources, "queueTimeoutMs"?: 1..300000, "timeoutMs"?: 1..300000, "wait"?: true }`. | `200 { "output": any }`. |
 | `POST /environments/{id}/preset` | Direct server only: `{ "name": string, "mode"?: "complete" \| "state", "workspace"?: [relativePath], "home"?: [relativePath] }`. | `201 Preset`. |
 | `GET /environments/{id}/terminals` | Website only. | `200 [{ id, state, created_at }]` (up to 20). |
 | `POST /environments/{id}/terminals` | Website: `{ "id": UUID, "columns"?: 20..300, "rows"?: 5..120 }`. Direct server also supports this path with `{ "id": UUID, "environmentId": id, "columns"?: 20..300, "rows"?: 5..120 }`. | `202 TerminalSession`. |
 
-`EnvironmentSettings` accepts only these fields: `saveScope?: "entire-environment" |
+`EnvironmentSettings` accepts `resources?: Resources` for saved CPU/RAM defaults, alongside these fields: `saveScope?: "entire-environment" |
 "workspace-only"`, `git?: boolean`, `execution?: { mode: "auto" | "isolate-only" | "native-only" }`,
 `network?: { mode: "disabled" } | { mode: "internet", maxBytesPerExecution?: 1..1073741824, allow?:
 [rule], deny?: [rule], vm?: {allow?,deny?}, v8?: {allow?,deny?} }`. Rules are hostnames,
@@ -118,7 +118,7 @@ result, not necessarily an HTTP failure.
 | `exitCode` | integer | Yes | Program exit status; zero conventionally indicates success. |
 | `durationMs` | nonnegative number | Yes | Recorded execution duration in milliseconds. |
 | `hostDurationMs` | nonnegative number | Yes | Host-side request execution duration in milliseconds. |
-| `allocationUsage` | object | No | Enforced CPU/RAM allocation measurements used for billing. |
+| `allocationUsage` | object | No | Effective limits, allocated RAM time and measured CPU usage used for billing. |
 | `networkUsage` | object | No | Network byte and connection measurements. |
 | `gitMetrics` | array | No | Git execution measurements. |
 | `pythonMetrics` | object | No | Python backend and execution measurements. |
@@ -155,8 +155,9 @@ curl 'https://putered.com/api/compute/v1/environments/env_demo/exec' \
   --data '{"command":"printf hello","timeoutMs":30000}'
 ```
 
+`memoryLimitExceeded?: boolean` indicates that the sandbox exceeded its RAM ceiling.
 Optional result fields have these shapes: `allocationUsage: { enforced: true, durationMs: integer,
-cpuQuotaMicros: positive integer, memoryBytes: positive integer }`; `networkUsage: { sentBytes,
+cpuQuotaMicros: positive integer, memoryBytes: positive integer, cpuMicros?: nonnegative integer }`; `networkUsage: { sentBytes,
 receivedBytes, connections, limitBytes }` (all nonnegative integers); `gitMetrics: [{ durationMs,
 wasmMemoryBytes, helperCount }]`; `pythonMetrics: { backend: "wasm" | "native", warm: boolean,
 sessionId?, initMs, executionMs, rssBytes, cpuMicros?, wasmMemoryBytes? }`. Metrics may be absent
@@ -336,3 +337,38 @@ fields.
 - SDK `output` is convenience-only. The wire result uses separate `stdout`, `stdoutBase64`, and `stderr` fields.
 - Website personal keys do not expose the complete core plugin/asset/tool interface. Website snapshots use account-owned preset operation endpoints, while direct server preset upload also accepts one raw OCI tar POST.
 - HTTP timeout limits differ by layer: account upstream calls use the command timeout plus a 10-second allowance, the public gateway permits a 330-second upstream connection, direct server request timeout is 30 seconds for receiving a request, and SDK async polling is capped at 30 minutes. None of these creates an idempotent command retry guarantee.
+
+## Per-execution resources and queueing
+
+`Resources` is `{ cpu?: number, memoryMiB?: number }`.
+`settings.resources` stores optional environment defaults. `exec`, `run` and tool
+call options accept `resources: { cpu?: number, memoryMiB?: number }` as field-wise
+overrides. CPU uses quarter-vCPU increments (minimum 0.25), and RAM uses 256 MiB
+increments (minimum 256). Current availability is capped at 1 vCPU / 1024 MiB;
+larger sizes reject before execution. The account API additionally enforces Plus
+2 vCPU / 2048 MiB and Pro 8 vCPU / 8192 MiB entitlement ceilings.
+
+`queueTimeoutMs` is 1–300000 (default 120000), independent of `timeoutMs`.
+Admission reserves the entire RAM ceiling; CPU shares fairly under contention,
+up to each request's ceiling. A task may receive less CPU without changing its
+requested maximum. FIFO memory admission prevents smaller tasks starving a
+larger waiter. There is no guaranteed minimum CPU share. Queue time is not billed.
+A queue timeout stops waiting for compute; automatic initialization may already
+have changed files. A running timeout may also leave partial file changes. Automatic Git initialization uses the same limits and
+shares the execution-time budget with the main command.
+
+Async snapshots retain `state: "running"` while queued and may include
+`phase: "queued" | "running"`. Cancelling queued work removes it from admission;
+running cancellation waits for descendant cleanup before releasing its RAM.
+After an ambiguous response or restart, inspect the command ID; never replay it.
+`allocationUsage.cpuMicros` measures aggregate CPU consumed by the sandbox and its
+descendants. RAM OOM is reported as top-level `memoryLimitExceeded: true` when a
+completed process was killed by its memory cgroup. RAM is not automatically grown.
+Resource enforcement must be available before execution; unsupported routes fail
+with `POLICY_DENIED`, with no fallback after effects.
+
+Explicit `queueTimeoutMs` on an offline automatic shell selects native execution;
+`isolate-only` shell environments reject this combination before effects. Direct
+Wasm Git with an explicit queue budget requires cgroup enforcement. Gateway
+async `exec` and `run` both use controllable core command tickets, even when
+resource overrides are omitted.

@@ -5,7 +5,7 @@ import { packageOf } from "../tool-artifact.js";
 import { PuteredError } from "../errors.js";
 import { compileToolSchema, toolValidator } from "../tool-validation.js";
 import type { Transport } from "./transport.js";
-import { callOptions, inputContract, type CallOptions } from "./input-contract.js";
+import { callOptions, inputContract, mergeResources, type CallOptions } from "./input-contract.js";
 import { storedToolResponseSchema, toolCallResponseSchema } from "./responses.js";
 
 declare const toolTypes: unique symbol;
@@ -45,7 +45,8 @@ export class Tools {
 }
 
 export class EnvironmentTools {
-  constructor(private readonly transport: Transport, private readonly record: EnvironmentRecord) {}
+  constructor(private readonly transport: Transport, private readonly record: EnvironmentRecord,
+    private readonly configResources?: { cpu?: number; memoryMiB?: number }) {}
   call<const T extends ToolMap, const K extends keyof NoInfer<T> & string>(reference: ToolReference<T>, name: K,
     input: z.input<NoInfer<T>[K]["input"]>, options?: CallOptions): Promise<{ output: z.output<T[K]["output"]> }>;
   call(reference: ToolReference, name: string, input: Json, options?: CallOptions): Promise<{ output: unknown }>;
@@ -59,10 +60,11 @@ export class EnvironmentTools {
     const validateOutput = compileToolSchema(ajv, definition.outputSchema);
     const value = jsonValue(input);
     if (!validateInput(value)) throw new PuteredError("Tool input does not match its schema.", "INVALID_INPUT");
+    const resources = mergeResources(this.configResources, this.record.settings.resources, options.resources);
     const result = await this.transport.request(`/environments/${this.record.id}/tools/call`, "POST",
       toolCallResponseSchema, {
         id: reference.id, tool: name, input: value,
-        ...callOptions(options),
+        ...callOptions({ ...options, ...(Object.keys(resources).length ? { resources } : {}) }),
       }, options.signal);
     if (!Object.hasOwn(result, "output")) throw new PuteredError("Missing tool output.", "INVALID_OUTPUT");
     let output: Json;

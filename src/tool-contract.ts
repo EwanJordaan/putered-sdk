@@ -8,6 +8,11 @@ import { internetPolicySchema } from "./network-policy.js";
 import { environmentVariablesSchema, outboundPolicySchema, outboundPolicyWriteSchema } from "./outbound-policy.js";
 
 const name = z.string().refine(validName);
+export const resourcesSchema = z.strictObject({
+  cpu: z.number().min(0.25).max(8).multipleOf(0.25).optional(),
+  memoryMiB: z.number().int().min(256).max(8192).multipleOf(256).optional(),
+});
+export const resourceOverridesSchema = resourcesSchema;
 const schema = z.record(z.string(), z.unknown());
 export const manifestSchema = z.strictObject({
   name,
@@ -43,6 +48,7 @@ export const environmentSettingsSchema = z.strictObject({
     internetPolicySchema,
   ]).optional(),
   timeoutMs: z.number().int().min(1).max(300000).optional(),
+  resources: resourcesSchema.optional(),
 });
 export const executionPreferenceSchema = z.strictObject({
   default: z.enum(["auto", "native", "v8"]).optional(),
@@ -73,6 +79,8 @@ export const createEnvironmentSchema = z.strictObject({
 export const callOptionsSchema = z.strictObject({
   wait: z.literal(true).optional(),
   timeoutMs: z.number().int().min(1).max(300000).optional(),
+  queueTimeoutMs: z.number().int().min(1).max(300000).optional(),
+  resources: resourceOverridesSchema.optional(),
 });
 export const runCommandSchema = z.strictObject({
   program: z.string().regex(/^[a-z][a-z0-9_-]{0,63}$/),

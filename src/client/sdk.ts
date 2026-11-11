@@ -10,7 +10,7 @@ import { Assets } from "./assets.js";
 import { Presets } from "./presets.js";
 import { Tools, type ToolReference } from "./tools.js";
 import { Environment } from "./environment.js";
-import { inputContract } from "./input-contract.js";
+import { inputContract, mergeResources } from "./input-contract.js";
 import { loadSdkConfig, type SdkConfig } from "./config.js";
 import { environmentResponseSchema } from "./responses.js";
 
@@ -60,13 +60,16 @@ function environmentRequest(value: EnvironmentOptions, config: SdkConfig) {
   const requestedNetwork = value.settings?.network;
   const network = config.network?.mode === "internet" && requestedNetwork?.mode === "internet"
     ? { ...config.network, ...requestedNetwork } : requestedNetwork ?? config.network;
+  const resources = mergeResources(config.resources, value.settings?.resources);
   return inputContract(createEnvironmentSchema, {
     ...(persistence === undefined ? {} : { persistence }),
     ...(execution === undefined ? {} : { execution }),
     ...(value.name === undefined ? {} : { name: value.name }),
     ...(value.template === undefined ? {} : { template: value.template }),
     ...(value.tools === undefined ? {} : { tools: value.tools.map(tool => tool.id) }),
-    settings: { ...value.settings, ...(network === undefined ? {} : { network }) },
+    settings: { ...value.settings,
+      ...(Object.keys(resources).length ? { resources } : {}),
+      ...(network === undefined ? {} : { network }) },
     ...(value.env === undefined ? {} : { env: value.env }),
     ...(value.networkPolicy === undefined ? {} : { networkPolicy: value.networkPolicy }),
   });
@@ -87,7 +90,7 @@ function checkEnvironmentResponse(request: z.output<typeof createEnvironmentSche
     throw new PuteredError("Environment response does not preserve the requested outbound network policy.", "PROTOCOL_ERROR");
   if (request.tools && canonical([...new Set(request.tools)].sort()) !== canonical([...record.tools].sort()))
     throw new PuteredError("Environment response does not match the requested tools.", "PROTOCOL_ERROR");
-  for (const key of ["git", "execution", "timeoutMs"] as const)
+  for (const key of ["git", "execution", "timeoutMs", "resources"] as const)
     if (request.settings?.[key] !== undefined && canonical(request.settings[key]) !== canonical(record.settings[key] ?? null))
       throw new PuteredError("Environment response does not match the requested settings.", "PROTOCOL_ERROR");
   const wanted = request.settings?.network;
@@ -142,14 +145,14 @@ export class Putered {
         const record = await transport.request("/environments", "POST", environmentResponseSchema, request);
         checkEnvironmentResponse(request, record);
         checkNetwork(record.settings.network);
-        return new Environment(transport, record);
+        return new Environment(transport, record, config.resources);
       },
       connect: async (id, options = {}) => {
         inputContract(environmentSchema.shape.id, id);
         const record = await transport.request(`/environments/${id}`, "GET", environmentResponseSchema, undefined, options.signal);
         if (record.id !== id) throw new PuteredError("Environment response ID mismatch.", "PROTOCOL_ERROR");
         checkNetwork(record.settings.network);
-        return new Environment(transport, record);
+        return new Environment(transport, record, config.resources);
       },
     };
   }
