@@ -1,6 +1,6 @@
 {
   "name": "@putered/sdk",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "type": "module",
   "description": "Typed Putered client, local plugins, stored binary assets, and optional plugin builder",
   "files": [

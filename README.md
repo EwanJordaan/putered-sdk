@@ -9,7 +9,7 @@ Requires Node.js 22.13 or later.
 ## Install
 
 ```sh
-npm install @putered/sdk@0.3.0
+npm install @putered/sdk@0.4.0
 ```
 
 To build a local tarball instead:
