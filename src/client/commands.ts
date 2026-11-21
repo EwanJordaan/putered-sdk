@@ -24,17 +24,25 @@ export type OutputChunk = { stream: "stdout" | "stderr"; data: string };
 export type OutputBytesChunk = { stream: "stdout" | "stderr"; data: Uint8Array };
 export interface LogOptions { signal?: AbortSignal; acceptTruncation?: boolean }
 export interface GetCommandOptions { cursor?: number; signal?: AbortSignal }
-export type CommandSignal = "SIGTERM" | "SIGKILL" | "SIGINT" | "SIGHUP" | "SIGQUIT" | "SIGSTOP" | "SIGCONT";
+const commandSignalSchema = z.enum(["SIGTERM", "SIGKILL", "SIGINT", "SIGHUP", "SIGQUIT", "SIGSTOP", "SIGCONT"]);
+export type CommandSignal = z.infer<typeof commandSignalSchema>;
 
 function decodeBase64(value: string): Uint8Array {
   const bytes = Buffer.from(value, "base64");
   if (bytes.toString("base64") !== value) throw new PuteredError("Invalid command output bytes.", "PROTOCOL_ERROR");
   return bytes;
 }
-function validateCursor(value: CommandSnapshot, requestedCursor: number): void {
-  const outputBytes = value.output.reduce((total, item) => total + decodeBase64(item.data).byteLength, 0);
-  if (value.cursor < requestedCursor || value.cursor < outputBytes || (!value.reset && value.cursor !== requestedCursor + outputBytes))
+function decodeSnapshotOutput(value: CommandSnapshot, requestedCursor: number): { chunks: OutputBytesChunk[]; totalBytes: number } {
+  const chunks: OutputBytesChunk[] = [];
+  let totalBytes = 0;
+  for (const item of value.output) {
+    const data = decodeBase64(item.data);
+    totalBytes += data.byteLength;
+    chunks.push({ stream: item.stream, data });
+  }
+  if (value.cursor < requestedCursor || value.cursor < totalBytes || (!value.reset && value.cursor !== requestedCursor + totalBytes))
     throw new PuteredError("Invalid command output cursor.", "PROTOCOL_ERROR");
+  return { chunks, totalBytes };
 }
 function commandFailure(snapshot: CommandSnapshot): never {
   if (snapshot.state === "unknown") throw new PuteredError(snapshot.error ?? "Command outcome is unknown.", "CONFLICT");
@@ -81,15 +89,15 @@ export class CommandHandle {
   setAbortCleanup(cleanup: () => void): void { this.abortCleanup = cleanup; }
   private finish(): void { this.abortCleanup?.(); this.abortCleanup = undefined; }
   async hasFinished(): Promise<boolean> {
-    const value = await this.snapshot(undefined, false, true);
-    return value.state !== "running";
+    const { snapshot } = await this.snapshot(undefined, false, true);
+    return snapshot.state !== "running";
   }
   private async snapshot(signal?: AbortSignal, advance = true, ignoreReset = false) {
     const requestedCursor = this.cursor;
     const value = await this.transport.request(`${this.path}?cursor=${requestedCursor}`, "GET", snapshotSchema, undefined, signal);
     if (value.id !== this.id || value.environmentId !== this.environmentId)
       throw new PuteredError("Command result identity mismatch.", "PROTOCOL_ERROR");
-    validateCursor(value, requestedCursor);
+    const decoded = decodeSnapshotOutput(value, requestedCursor);
     if (value.reset) {
       this.lostOutputHistory = true;
       if (!ignoreReset) throw new PuteredError("Command output history was truncated; use logs({ acceptTruncation: true }) to continue with retained output.", "CONFLICT");
@@ -97,7 +105,7 @@ export class CommandHandle {
     if (value.state !== "running") this.finish();
     if (advance) this.cursor = Math.max(this.cursor, value.cursor);
     if (value.stdinOpen !== undefined) this.stdinOpen = value.stdinOpen;
-    return value;
+    return { snapshot: value, ...decoded };
   }
   /** UTF-8 text convenience; use logsBytes() for binary output. */
   async *logs(options: LogOptions = {}): AsyncGenerator<OutputChunk> {
@@ -119,13 +127,12 @@ export class CommandHandle {
       if (this.lostOutputHistory && !options.acceptTruncation) throw new PuteredError("Command output history was truncated; use logs({ acceptTruncation: true }) to continue with retained output.", "CONFLICT");
       for (;;) {
         options.signal?.throwIfAborted();
-        const value = await this.snapshot(options.signal, false, options.acceptTruncation === true);
+        const { snapshot: value, chunks, totalBytes } = await this.snapshot(options.signal, false, options.acceptTruncation === true);
         this.lostOutputHistory = false;
-        if (value.reset) this.cursor = value.cursor - value.output.reduce((total, item) => total + decodeBase64(item.data).byteLength, 0);
-        for (const item of value.output) {
-          const data = decodeBase64(item.data);
-          this.cursor += data.byteLength;
-          yield { stream: item.stream, data };
+        if (value.reset) this.cursor = value.cursor - totalBytes;
+        for (const chunk of chunks) {
+          this.cursor += chunk.data.byteLength;
+          yield chunk;
         }
         if (value.state === "completed") {
           this._result = savedCommandResult(value.result);
@@ -141,7 +148,7 @@ export class CommandHandle {
     if (this.outputFailure !== undefined) throw this.outputFailure;
     for (;;) {
       options.signal?.throwIfAborted();
-      const value = await this.snapshot(options.signal, false, true);
+      const { snapshot: value } = await this.snapshot(options.signal, false, true);
       if (value.state === "completed") {
         await this.outputPump;
         this._result = savedCommandResult(value.result);
@@ -176,8 +183,7 @@ export class CommandHandle {
     });
   }
   async kill(signal: CommandSignal = "SIGTERM"): Promise<void> {
-    const parsed = z.enum(["SIGTERM", "SIGKILL", "SIGINT", "SIGHUP", "SIGQUIT", "SIGSTOP", "SIGCONT"]).safeParse(signal);
-    if (!parsed.success) throw new PuteredError("Unsupported command signal.", "INVALID_INPUT");
+    if (!commandSignalSchema.safeParse(signal).success) throw new PuteredError("Unsupported command signal.", "INVALID_INPUT");
     if (this.program === "git" && signal !== "SIGKILL")
       throw new PuteredError("Direct Wasm Git only supports SIGKILL.", "CONFLICT");
     const result = await this.transport.request(`${this.path}/signal`, "POST", snapshotSchema, { signal });
@@ -214,7 +220,7 @@ export async function loadCommandHandle(transport: Transport, environmentId: str
   const value = await transport.request(`${path}?cursor=${cursor}`, "GET", snapshotSchema, undefined, options.signal);
   if (value.id !== id || value.environmentId !== environmentId)
     throw new PuteredError("Command result identity mismatch.", "PROTOCOL_ERROR");
-  validateCursor(value, cursor);
+  decodeSnapshotOutput(value, cursor);
   return new CommandHandle(transport, environmentId, id, path, value.program, value.reset === true,
     value.nextSequence ?? 0, value.stdinOpen, cursor);
 }

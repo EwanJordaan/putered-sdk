@@ -8,19 +8,19 @@ Defaults: persistence and network come from putered.config.json. Custom paths ar
 
 export async function runEnvironmentCli(args: string[]) {
   if (args.includes("--help") || args[0] === "help") { console.log(environmentUsage); return; }
-  const client = clientFromEnv();
   if (["exec", "describe"].includes(args[0])) {
     const [action, id, ...rest] = args;
     if (!id) throw new Error(environmentUsage);
-    const environment = await client.environments.connect(id);
     if (action === "describe") {
       if (rest.length) throw new Error(environmentUsage);
+      const environment = await clientFromEnv().environments.connect(id);
       console.log(JSON.stringify(environment.describe(), null, 2)); return;
     }
     const json = rest[0] === "--json";
     if (json) rest.shift();
     if (rest[0] === "--") rest.shift();
     if (rest.length !== 1) throw new Error("Supply one quoted shell command after --.");
+    const environment = await clientFromEnv().environments.connect(id);
     await withSignalAbort(async signal => {
       const result = await environment.exec(rest[0], { signal });
       if (json) console.log(JSON.stringify(result));
@@ -44,7 +44,7 @@ export async function runEnvironmentCli(args: string[]) {
   const persistence = mode === undefined ? undefined : persistenceSchema.parse(mode === "custom" ? { mode, include, exclude } : mode);
   const network = flags.get("--network")?.[0];
   if (network !== undefined && !["internet", "disabled"].includes(network)) throw new Error("--network must be internet or disabled.");
-  const environment = await client.environments.create({ template: flags.get("--template")?.[0] ?? "general", persistence, settings: {
+  const environment = await clientFromEnv().environments.create({ template: flags.get("--template")?.[0] ?? "general", persistence, settings: {
     ...(network === undefined ? {} : { network: { mode: network as "internet" | "disabled" } }) } });
   const record = environment.describe();
   console.log(json ? JSON.stringify(record, null, 2) :

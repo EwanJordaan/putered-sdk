@@ -30,10 +30,12 @@ export interface CommandResult extends ExecutionData {
 }
 
 export function commandResult(result: ExecutionData, check = true): CommandResult {
-  const command = Object.defineProperty(result, "output", {
-    enumerable: false,
-    value: result.stdout + result.stderr,
-  }) as CommandResult;
+  const command = Object.hasOwn(result, "output")
+    ? result as CommandResult
+    : Object.defineProperty(result, "output", {
+        enumerable: false,
+        value: result.stdout + result.stderr,
+      }) as CommandResult;
   if (check && command.exitCode !== 0) throw new CommandError(command);
   return command;
 }

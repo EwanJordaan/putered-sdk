@@ -176,12 +176,10 @@ export class Presets {
       stream = Readable.from((async function* () {
         while (completedBytes < stat.size) {
           cancelled(options.signal);
-          const buffer = Buffer.allocUnsafe(Math.min(64 * 1024, stat.size - completedBytes));
-          const { bytesRead } = await file.read(buffer, 0, buffer.length, completedBytes);
-          if (!bytesRead) throw new PuteredError("Preset archive changed during upload.", "INVALID_INPUT");
-          const chunk = buffer.subarray(0, bytesRead);
+          const chunk = await readExactChunk(file, completedBytes, Math.min(64 * 1024, stat.size - completedBytes),
+            "Preset archive changed during upload.");
           digest.update(chunk);
-          completedBytes += bytesRead;
+          completedBytes += chunk.byteLength;
           progress();
           yield chunk;
         }
@@ -226,25 +224,22 @@ export class Presets {
         let completedBytes = 0;
         options.onProgress?.({ completedBytes, totalBytes: record.bytes });
         const reader = response.body.getReader();
-        const source = async function* () {
-          try {
-            for (;;) {
-              cancelled(options.signal);
-              let next;
-              try { next = await reader.read(); }
-              catch (error) { throw new PuteredError("Could not read preset download.", "NETWORK_ERROR", { cause: error }); }
-              if (next.done) break;
-              completedBytes += next.value.byteLength;
-              if (completedBytes > record.bytes) throw new PuteredError("Preset download exceeds its declared size.", "PROTOCOL_ERROR");
-              digest.update(next.value);
-              yield next.value;
-              options.onProgress?.({ completedBytes, totalBytes: record.bytes });
-            }
-            if (completedBytes !== record.bytes || digest.digest("hex") !== record.archiveSha256)
-              throw new PuteredError("Preset download checksum or size mismatch.", "PROTOCOL_ERROR");
-          } finally { await reader.cancel().catch(() => undefined); reader.releaseLock(); }
-        };
-        for await (const chunk of source()) await file.writeFile(chunk);
+        try {
+          for (;;) {
+            cancelled(options.signal);
+            let next;
+            try { next = await reader.read(); }
+            catch (error) { throw new PuteredError("Could not read preset download.", "NETWORK_ERROR", { cause: error }); }
+            if (next.done) break;
+            completedBytes += next.value.byteLength;
+            if (completedBytes > record.bytes) throw new PuteredError("Preset download exceeds its declared size.", "PROTOCOL_ERROR");
+            digest.update(next.value);
+            await file.writeFile(next.value);
+            options.onProgress?.({ completedBytes, totalBytes: record.bytes });
+          }
+          if (completedBytes !== record.bytes || digest.digest("hex") !== record.archiveSha256)
+            throw new PuteredError("Preset download checksum or size mismatch.", "PROTOCOL_ERROR");
+        } finally { await reader.cancel().catch(() => undefined); reader.releaseLock(); }
         await file.sync();
       } finally { await file.close(); }
       cancelled(options.signal);
