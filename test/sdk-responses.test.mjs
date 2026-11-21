@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { Putered } from '../dist/client/sdk.js';
 import { assetId, ASSET_CHUNK_BYTES } from '../dist/asset-contract.js';
 import { presetId } from '../dist/preset-contract.js';
-import { MAX_BYTES } from '../dist/limits.js';
+import { MAX_BYTES } from '../dist/json.js';
 import { defineTool } from '../dist/tool-definition.js';
 import { z } from 'zod';
 

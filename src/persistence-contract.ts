@@ -12,9 +12,6 @@ export const persistenceSchema = z.union([
     exclude: z.array(guestPath).max(128).optional() }),
 ]);
 export type Persistence = z.infer<typeof persistenceSchema>;
-export function environmentPersistence(environment: { persistence?: Persistence }): Persistence {
-  return environment.persistence ?? "full";
-}
 export function samePersistence(a: Persistence, b: Persistence) {
   return JSON.stringify(a) === JSON.stringify(b);
 }

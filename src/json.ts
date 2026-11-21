@@ -1,5 +1,8 @@
 import { PuteredError } from "./errors.js";
 
+/** Hard ceiling for bounded wire payloads and stdout/stderr responses. */
+export const MAX_BYTES = 4 * 1024 * 1024;
+
 export type Json = null | boolean | number | string | Json[] | { [key: string]: Json };
 export const JSON_MAX_BYTES = 8 * 1024 * 1024;
 export const JSON_MAX_DEPTH = 64;

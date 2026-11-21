@@ -2,15 +2,13 @@ import { z } from "zod";
 import { createEnvironmentSchema, environmentSchema, type EnvironmentRecord } from "../tool-contract.js";
 import { canonical, type ToolMap } from "../tool-definition.js";
 import { PuteredError } from "../errors.js";
-import { DEFAULT_INTERNET_BYTES, preservesNetworkRules } from "../network-policy.js";
-import { persistenceSchema, samePersistence, type Persistence } from "../persistence-contract.js";
-import { redactOutboundPolicy } from "../outbound-policy.js";
+import { samePersistence, type Persistence } from "../persistence-contract.js";
 import { Transport } from "./transport.js";
 import { Assets } from "./assets.js";
 import { Presets } from "./presets.js";
 import { Tools, type ToolReference } from "./tools.js";
 import { Environment } from "./environment.js";
-import { inputContract, mergeResources } from "./input-contract.js";
+import { assertEnvAndOutboundPolicy, assertNetworkPreserved, inputContract, mergeResources } from "./input-contract.js";
 import { loadSdkConfig, type SdkConfig } from "./config.js";
 import { environmentResponseSchema } from "./responses.js";
 
@@ -50,28 +48,27 @@ export interface EnvironmentOptions {
   networkPolicy?: z.input<typeof createEnvironmentSchema>["networkPolicy"];
 }
 function environmentRequest(value: EnvironmentOptions, config: SdkConfig) {
-  if (!value || typeof value !== "object" || Array.isArray(value) ||
-      Object.keys(value).some(key => !["name", "template", "tools", "settings", "persistence", "execution", "env", "networkPolicy"].includes(key)))
+  if (!value || typeof value !== "object" || Array.isArray(value))
     throw new PuteredError("Unknown or invalid environment creation option.", "INVALID_INPUT");
-  const persistence = value.persistence === undefined ? config.persistence
-    : inputContract(persistenceSchema, value.persistence);
-  const execution = value.execution === undefined ? config.execution
-    : inputContract(createEnvironmentSchema.shape.execution!, value.execution);
-  const requestedNetwork = value.settings?.network;
+  const { tools, settings, ...rest } = value;
+  const settingsObject = settings !== undefined && typeof settings === "object" && settings !== null && !Array.isArray(settings)
+    ? settings : undefined;
+  const persistence = value.persistence === undefined ? config.persistence : value.persistence;
+  const execution = value.execution === undefined ? config.execution : value.execution;
+  const requestedNetwork = settingsObject?.network;
   const network = config.network?.mode === "internet" && requestedNetwork?.mode === "internet"
     ? { ...config.network, ...requestedNetwork } : requestedNetwork ?? config.network;
-  const resources = mergeResources(config.resources, value.settings?.resources);
+  const resources = mergeResources(config.resources, settingsObject?.resources);
   return inputContract(createEnvironmentSchema, {
+    ...rest,
     ...(persistence === undefined ? {} : { persistence }),
     ...(execution === undefined ? {} : { execution }),
-    ...(value.name === undefined ? {} : { name: value.name }),
-    ...(value.template === undefined ? {} : { template: value.template }),
-    ...(value.tools === undefined ? {} : { tools: value.tools.map(tool => tool.id) }),
-    settings: { ...value.settings,
+    ...(tools === undefined ? {} : { tools: Array.isArray(tools) ? tools.map(tool => tool?.id) : tools }),
+    settings: settings !== undefined && !settingsObject ? settings : {
+      ...settingsObject,
       ...(Object.keys(resources).length ? { resources } : {}),
-      ...(network === undefined ? {} : { network }) },
-    ...(value.env === undefined ? {} : { env: value.env }),
-    ...(value.networkPolicy === undefined ? {} : { networkPolicy: value.networkPolicy }),
+      ...(network === undefined ? {} : { network }),
+    },
   });
 }
 
@@ -84,10 +81,7 @@ function checkEnvironmentResponse(request: z.output<typeof createEnvironmentSche
     throw new PuteredError("Environment response does not preserve the requested execution preference.", "PROTOCOL_ERROR");
   if (request.name !== undefined && record.name !== request.name)
     throw new PuteredError("Environment response does not match the requested name.", "PROTOCOL_ERROR");
-  if (request.env !== undefined && canonical(record.env ?? null) !== canonical(request.env))
-    throw new PuteredError("Environment response does not preserve the requested environment variables.", "PROTOCOL_ERROR");
-  if (request.networkPolicy !== undefined && canonical(record.networkPolicy ?? null) !== canonical(redactOutboundPolicy(request.networkPolicy)))
-    throw new PuteredError("Environment response does not preserve the requested outbound network policy.", "PROTOCOL_ERROR");
+  assertEnvAndOutboundPolicy(request, record);
   if (request.tools && canonical([...new Set(request.tools)].sort()) !== canonical([...record.tools].sort()))
     throw new PuteredError("Environment response does not match the requested tools.", "PROTOCOL_ERROR");
   for (const key of ["git", "execution", "timeoutMs", "resources"] as const)
@@ -96,13 +90,12 @@ function checkEnvironmentResponse(request: z.output<typeof createEnvironmentSche
   const wanted = request.settings?.network;
   const actual = record.settings.network;
   if (wanted) {
-    const modeChanged = wanted.mode !== actual?.mode;
-    const rulesChanged = wanted.mode === "internet" && actual?.mode === "internet" && !preservesNetworkRules(wanted, actual);
-    const limitExceeded = wanted.mode === "internet" && actual?.mode === "internet" &&
-      wanted.maxBytesPerExecution !== undefined &&
-      (actual.maxBytesPerExecution ?? DEFAULT_INTERNET_BYTES) > wanted.maxBytesPerExecution;
-    if (modeChanged || rulesChanged || limitExceeded)
+    if (wanted.mode !== actual?.mode)
       throw new PuteredError("Environment response does not preserve the requested network policy.", "PROTOCOL_ERROR");
+    assertNetworkPreserved(wanted, actual, "PROTOCOL_ERROR", {
+      rules: "Environment response does not preserve the requested network policy.",
+      limit: "Environment response does not preserve the requested network policy.",
+    });
   }
 }
 
@@ -127,13 +120,10 @@ export class Putered {
     const checkNetwork = (network: EnvironmentRecord["settings"]["network"]) => {
       if (config.network?.mode === "disabled" && network?.mode === "internet")
         throw new PuteredError("SDK config disables internet. Use an offline environment.", "POLICY_DENIED");
-      if (config.network?.mode === "internet" && network?.mode === "internet") {
-        if (!preservesNetworkRules(config.network, network))
-          throw new PuteredError("Environment network rules do not preserve this SDK's configured restrictions.", "POLICY_DENIED");
-        if (config.network.maxBytesPerExecution !== undefined &&
-            (network.maxBytesPerExecution ?? DEFAULT_INTERNET_BYTES) > config.network.maxBytesPerExecution)
-          throw new PuteredError("Environment network limit exceeds this SDK's configured limit.", "POLICY_DENIED");
-      }
+      assertNetworkPreserved(config.network, network, "POLICY_DENIED", {
+        rules: "Environment network rules do not preserve this SDK's configured restrictions.",
+        limit: "Environment network limit exceeds this SDK's configured limit.",
+      });
     };
     this.tools = new Tools(transport);
     this.assets = new Assets(transport);

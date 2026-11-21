@@ -1,4 +1,5 @@
-import { Putered, PuteredError, type Preset } from "./sdk.js";
+import { type Preset } from "./sdk.js";
+import { clientFromEnv, parseCliFlags, withSignalAbort } from "./cli-helpers.js";
 
 export const presetUsage = `Usage:
   putered presets upload <image.oci.tar> --name <name> [--json]
@@ -23,19 +24,13 @@ export async function runPresetCli(args: string[]) {
   if (args.includes("--help") || args[0] === "help") { console.log(presetUsage); return; }
   const [action, ...rest] = args;
   if (!["upload", "capture", "list", "inspect", "download"].includes(action)) throw new Error(presetUsage);
-  const positional: string[] = [], flags = new Map<string, string[]>(); let json = false;
-  const allowed = action === "upload" ? ["--name"] : action === "capture" ? ["--name", "--mode", "--workspace", "--home"] :
-    action === "download" ? ["--output"] : [];
-  for (let index = 0; index < rest.length; index++) {
-    const arg = rest[index];
-    if (arg === "--json") { if (json) throw new Error("Duplicate --json option."); json = true; continue; }
-    if (!arg.startsWith("-")) { positional.push(arg); continue; }
-    if (!allowed.includes(arg)) throw new Error(`Unknown option for presets ${action}: ${arg}`);
-    const value = rest[++index];
-    if (!value || value.startsWith("--")) throw new Error(`${arg} requires a value.`);
-    if (flags.has(arg) && !["--workspace", "--home"].includes(arg)) throw new Error(`Duplicate option: ${arg}`);
-    flags.set(arg, [...(flags.get(arg) ?? []), value]);
-  }
+  const { positional, flags, booleans } = parseCliFlags(rest, {
+    valueFlags: action === "upload" ? ["--name"] : action === "capture" ? ["--name", "--mode"] : action === "download" ? ["--output"] : [],
+    repeatableFlags: action === "capture" ? ["--workspace", "--home"] : [],
+    booleanFlags: ["--json"],
+    unknownOptionMessage: flag => `Unknown option for presets ${action}: ${flag}`,
+  });
+  const json = booleans.has("--json");
   if (positional.length !== (action === "list" ? 0 : 1)) throw new Error(presetUsage);
   const name = flags.get("--name")?.[0], destination = flags.get("--output")?.[0];
   if (["upload", "capture"].includes(action) && !name) throw new Error("--name is required.");
@@ -45,13 +40,9 @@ export async function runPresetCli(args: string[]) {
   if (mode === "complete" && (flags.has("--workspace") || flags.has("--home")))
     throw new Error("--workspace and --home require --mode state.");
 
-  const client = new Putered({ baseUrl: process.env.PUTERED_BASE_URL,
-    apiKey: process.env.PUTERED_API_KEY ?? "" });
-  const controller = new AbortController();
-  const cancel = () => controller.abort();
-  process.once("SIGINT", cancel); process.once("SIGTERM", cancel);
-  try {
-    const options = { signal: controller.signal };
+  const client = clientFromEnv();
+  await withSignalAbort(async signal => {
+    const options = { signal };
     let result: Preset | Preset[];
     if (action === "upload") result = await client.presets.upload({ name: name!, file: positional[0], ...options });
     else if (action === "list") result = await client.presets.list(options);
@@ -67,9 +58,5 @@ export async function runPresetCli(args: string[]) {
       console.log(Array.isArray(result) ? result.length ? result.map(describe).join("\n") : "No presets." : describe(result));
       if (action === "download") console.log(`Saved to ${destination}`);
     }
-  } catch (error) {
-    if (controller.signal.aborted && !(error instanceof PuteredError && error.code === "CANCELLED"))
-      throw new PuteredError("Preset command cancelled; publication may already have completed.", "CANCELLED");
-    throw error;
-  } finally { process.removeListener("SIGINT", cancel); process.removeListener("SIGTERM", cancel); }
+  }, "Preset command cancelled; publication may already have completed.");
 }

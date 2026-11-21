@@ -2,8 +2,7 @@ import { z } from "zod";
 import { environmentSchema, environmentSettingsSchema, storedToolSchema } from "../tool-contract.js";
 import { assetId, assetReferenceSchema, assetSummarySchema, assetUploadSchema } from "../asset-contract.js";
 import { presetId, presetSchema } from "../preset-contract.js";
-import { MAX_BYTES } from "../limits.js";
-import { jsonValue } from "../json.js";
+import { MAX_BYTES, jsonValue } from "../json.js";
 
 // Ignore additive envelope metadata, never unknown request/policy/manifest fields.
 export const environmentResponseSchema = environmentSchema.strip();

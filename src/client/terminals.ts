@@ -2,10 +2,19 @@ import { Buffer } from "node:buffer";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { PuteredError } from "../errors.js";
+import { inputContract } from "./input-contract.js";
 import type { Transport } from "./transport.js";
 
 const columnsSchema = z.number().int().min(20).max(300);
 const rowsSchema = z.number().int().min(5).max(120);
+const cursorSchema = z.number().int().nonnegative();
+const uuidSchema = z.string().uuid();
+const resizeSchema = z.object({ columns: columnsSchema, rows: rowsSchema });
+const startTerminalSchema = z.object({
+  id: uuidSchema,
+  columns: columnsSchema.optional(),
+  rows: rowsSchema.optional(),
+});
 const stateSchema = z.object({
   id: z.string().uuid(),
   environmentId: z.string(),
@@ -49,7 +58,7 @@ export class TerminalSession {
   }
 
   async read(options: { cursor?: number; signal?: AbortSignal } = {}) {
-    const cursor = z.number().int().nonnegative().parse(options.cursor ?? 0);
+    const cursor = inputContract(cursorSchema, options.cursor ?? 0);
     const state = this.checked(await this.transport.request(
       `/terminals/${this.id}?cursor=${cursor}`, "GET", stateSchema, undefined, options.signal,
     ));
@@ -81,7 +90,7 @@ export class TerminalSession {
   }
 
   resize(columns: number, rows: number, options: { signal?: AbortSignal } = {}) {
-    const value = z.object({ columns: columnsSchema, rows: rowsSchema }).parse({ columns, rows });
+    const value = inputContract(resizeSchema, { columns, rows });
     return this.input(value, options.signal);
   }
 
@@ -96,11 +105,7 @@ export class EnvironmentTerminals {
   constructor(private readonly transport: Transport, private readonly environmentId: string) {}
 
   async start(options: { id?: string; columns?: number; rows?: number; signal?: AbortSignal } = {}) {
-    const request = z.object({
-      id: z.string().uuid(),
-      columns: columnsSchema.optional(),
-      rows: rowsSchema.optional(),
-    }).parse({
+    const request = inputContract(startTerminalSchema, {
       id: options.id ?? randomUUID(),
       ...(options.columns === undefined ? {} : { columns: options.columns }),
       ...(options.rows === undefined ? {} : { rows: options.rows }),
@@ -114,7 +119,7 @@ export class EnvironmentTerminals {
   }
 
   async connect(id: string, options: { signal?: AbortSignal } = {}) {
-    z.string().uuid().parse(id);
+    inputContract(uuidSchema, id);
     const terminal = new TerminalSession(this.transport, id, this.environmentId);
     await terminal.read(options);
     return terminal;

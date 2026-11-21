@@ -61,28 +61,3 @@ export function preservesNetworkRules(parent: InternetPolicy, child: InternetPol
       (before.deny ?? []).every(rule => after?.deny?.includes(rule)));
   });
 }
-
-export function compileNetworkPolicy(policy: InternetPolicy, runtime: NetworkRuntime = "vm") {
-  const groups = [policy, policy[runtime]].filter(group => group !== undefined).map(group => ({
-    allow: group.allow?.map(parseNetworkRule), deny: group.deny?.map(parseNetworkRule) ?? [],
-  }));
-  const matches = (rule: Rule, hostname: string, protocol: "http:" | "https:", address?: string) => {
-    if (rule.kind === "ip") return !!address && !!isIP(address) && rule.block.check(address, isIP(address) === 4 ? "ipv4" : "ipv6");
-    return (!rule.protocol || rule.protocol === protocol) && (rule.wildcard ? hostname.endsWith(`.${rule.host}`) : hostname === rule.host);
-  };
-  return {
-    // A trusted upstream proxy must receive the screened numeric address whenever
-    // IP rules apply, so its independent DNS cannot change the allowed peer.
-    pinProxyAddress: groups.some(group => [...(group.allow ?? []), ...group.deny].some(rule => rule.kind === "ip" || isIP(rule.host))),
-    allowsHost(host: string, protocol: "http:" | "https:") {
-      const hostname = host.toLowerCase().replace(/\.$/, "");
-      return groups.every(group => !group.deny.some(rule => rule.kind === "host" && matches(rule, hostname, protocol)) &&
-        (group.allow === undefined || group.allow.some(rule => rule.kind === "ip" || matches(rule, hostname, protocol))));
-    },
-    allows(host: string, protocol: "http:" | "https:", address?: string) {
-      const hostname = host.toLowerCase().replace(/\.$/, "");
-      return groups.every(group => !group.deny.some(rule => matches(rule, hostname, protocol, address)) &&
-        (group.allow === undefined || group.allow.some(rule => matches(rule, hostname, protocol, address))));
-    },
-  };
-}

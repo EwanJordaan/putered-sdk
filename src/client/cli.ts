@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { lstat, writeFile } from "node:fs/promises";
-import { Putered, PuteredError } from "./sdk.js";
+import { PuteredError } from "./sdk.js";
+import { clientFromEnv, parseCliFlags, withSignalAbort } from "./cli-helpers.js";
 import { runPresetCli, presetUsage } from "./preset-cli.js";
 import { runEnvironmentCli, environmentUsage } from "./environment-cli.js";
 import { assetPlatformSchema } from "../asset-contract.js";
@@ -21,28 +22,29 @@ async function main() {
   }
   if (group !== "assets" || action !== "upload" || !source) throw new Error(
     "Usage: putered assets upload <file-or-directory> --platform linux-x64 --entrypoint name=path [--entrypoint ...] [--output tool.asset.ts]\n       putered presets --help");
+  const { flags, booleans } = parseCliFlags(args, {
+    valueFlags: ["--platform", "--output"],
+    repeatableFlags: ["--entrypoint"],
+    booleanFlags: ["--json"],
+    allowPositionals: false,
+  });
   const entrypoints: Record<string, string> = {};
-  let platform: string | undefined, output: string | undefined, json = false;
-  for (let index = 0; index < args.length; index++) {
-    const flag = args[index];
-    if (flag === "--json") { if (json) throw new Error("Duplicate --json option."); json = true; continue; }
-    const value = args[++index];
-    if (!value) throw new Error("CLI options require a value.");
-    if (flag === "--platform") platform = value;
-    else if (flag === "--output") output = value;
-    else if (flag === "--entrypoint") {
-      const split = value.indexOf("=");
-      if (split <= 0 || Object.hasOwn(entrypoints, value.slice(0, split))) throw new Error("Entrypoints use unique name=relative/path values.");
-      entrypoints[value.slice(0, split)] = value.slice(split + 1);
-    } else throw new Error(`Unknown CLI option: ${flag}`);
+  for (const value of flags.get("--entrypoint") ?? []) {
+    const split = value.indexOf("=");
+    if (split <= 0 || Object.hasOwn(entrypoints, value.slice(0, split))) throw new Error("Entrypoints use unique name=relative/path values.");
+    entrypoints[value.slice(0, split)] = value.slice(split + 1);
   }
+  const platform = flags.get("--platform")?.[0];
+  const output = flags.get("--output")?.[0];
+  const json = booleans.has("--json");
   if (output) {
     if (!output.endsWith(".ts")) throw new Error("Asset references must be saved as a .ts source file.");
     try { await lstat(output); throw new Error("Output already exists; choose another source file."); }
     catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
   }
-  const client = new Putered({ baseUrl: process.env.PUTERED_BASE_URL, apiKey: process.env.PUTERED_API_KEY ?? "" });
-  const reference = await client.assets.upload(source, { platform: assetPlatformSchema.parse(platform), entrypoints });
+  const client = clientFromEnv();
+  const reference = await withSignalAbort(signal =>
+    client.assets.upload(source, { platform: assetPlatformSchema.parse(platform), entrypoints, signal }));
   if (output) {
     await writeFile(output, `// Stored bytes only; tool schemas and handlers stay in your codebase.\nimport { defineAsset } from "@putered/sdk/plugins";\nexport default defineAsset(${JSON.stringify(reference, null, 2)});\n`, { flag: "wx" });
   }

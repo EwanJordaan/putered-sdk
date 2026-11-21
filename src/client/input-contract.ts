@@ -1,6 +1,9 @@
 import { z } from "zod";
-import { PuteredError } from "../errors.js";
-import { callOptionsSchema, resourceOverridesSchema } from "../tool-contract.js";
+import { PuteredError, type ErrorCode } from "../errors.js";
+import { DEFAULT_INTERNET_BYTES, preservesNetworkRules } from "../network-policy.js";
+import { redactOutboundPolicy } from "../outbound-policy.js";
+import { callOptionsSchema, resourceOverridesSchema, type EnvironmentRecord } from "../tool-contract.js";
+import { canonical } from "../tool-definition.js";
 
 export interface CallOptions {
   wait?: true;
@@ -34,4 +37,27 @@ export function callOptions(options: CallOptions) {
     ...(options.queueTimeoutMs === undefined ? {} : { queueTimeoutMs: options.queueTimeoutMs }),
     ...(options.resources === undefined ? {} : { resources: options.resources }),
   });
+}
+
+export function assertEnvAndOutboundPolicy(
+  requested: { env?: EnvironmentRecord["env"]; networkPolicy?: Parameters<typeof redactOutboundPolicy>[0] },
+  record: Pick<EnvironmentRecord, "env" | "networkPolicy">,
+): void {
+  if (requested.env !== undefined && canonical(record.env ?? null) !== canonical(requested.env))
+    throw new PuteredError("Environment response does not preserve the requested environment variables.", "PROTOCOL_ERROR");
+  if (requested.networkPolicy !== undefined && canonical(record.networkPolicy ?? null) !== canonical(redactOutboundPolicy(requested.networkPolicy)))
+    throw new PuteredError("Environment response does not preserve the requested outbound network policy.", "PROTOCOL_ERROR");
+}
+
+export function assertNetworkPreserved(
+  expected: EnvironmentRecord["settings"]["network"],
+  actual: EnvironmentRecord["settings"]["network"],
+  code: ErrorCode,
+  messages: { rules: string; limit: string },
+): void {
+  if (expected?.mode !== "internet" || actual?.mode !== "internet") return;
+  if (!preservesNetworkRules(expected, actual)) throw new PuteredError(messages.rules, code);
+  if (expected.maxBytesPerExecution !== undefined &&
+      (actual.maxBytesPerExecution ?? DEFAULT_INTERNET_BYTES) > expected.maxBytesPerExecution)
+    throw new PuteredError(messages.limit, code);
 }

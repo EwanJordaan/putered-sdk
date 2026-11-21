@@ -55,6 +55,18 @@ export async function scanAsset(source: string, platform: AssetPlatform, entrypo
     throw new PuteredError("Could not read or validate asset files.", "INVALID_INPUT", { cause: error });
   }
 }
+export async function readExactChunk(handle: Awaited<ReturnType<typeof open>>, offset: number, length: number,
+  changedMessage: string): Promise<Buffer> {
+  const bytes = Buffer.allocUnsafe(length);
+  let read = 0;
+  while (read < bytes.length) {
+    const result = await handle.read(bytes, read, bytes.length - read, offset + read);
+    if (!result.bytesRead) throw new PuteredError(changedMessage, "INVALID_INPUT");
+    read += result.bytesRead;
+  }
+  return bytes;
+}
+
 export async function uploadFiles(manifest: AssetManifest, paths: Map<string, string>, upload: AssetUpload,
   part: (file: AssetFile, offset: number, bytes: Uint8Array) => Promise<AssetUpload>, signal?: AbortSignal) {
   for (const file of manifest.files) {
@@ -65,13 +77,8 @@ export async function uploadFiles(manifest: AssetManifest, paths: Map<string, st
       while (upload.offsets[file.sha256] < file.bytes) {
         cancelled(signal);
         const offset = upload.offsets[file.sha256];
-        const bytes = Buffer.alloc(Math.min(upload.chunkBytes, file.bytes - offset));
-        let read = 0;
-        while (read < bytes.length) {
-          const result = await handle.read(bytes, read, bytes.length - read, offset + read);
-          if (!result.bytesRead) throw new PuteredError("Asset source changed during upload.", "INVALID_INPUT");
-          read += result.bytesRead;
-        }
+        const bytes = await readExactChunk(handle, offset, Math.min(upload.chunkBytes, file.bytes - offset),
+          "Asset source changed during upload.");
         upload = await part(file, offset, bytes);
         if (upload.offsets[file.sha256] < offset + bytes.length)
           throw new PuteredError("Upload acknowledgement did not advance; the part was not retried.", "PROTOCOL_ERROR");

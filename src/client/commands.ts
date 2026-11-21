@@ -1,18 +1,21 @@
 import { z } from "zod";
 import { setTimeout as delay } from "node:timers/promises";
 import { Readable, type Writable } from "node:stream";
-import { ERROR_CODES, PuteredError, codeForStatus } from "../errors.js";
-import type { Transport } from "./transport.js";
+import { PuteredError } from "../errors.js";
+import { parseWireError, type Transport } from "./transport.js";
 import { commandResult, CommandError, type CommandResult } from "./command-output.js";
 import { execResultSchema } from "./responses.js";
 
-export const snapshotSchema = z.object({
+export const commandJobBaseSchema = z.object({
   id: z.string().uuid(), environmentId: z.string(), state: z.enum(["running", "completed", "failed", "unknown"]),
   phase: z.enum(["queued", "running"]).optional(),
+  httpStatus: z.number().int().min(100).max(599).optional(), result: z.unknown().optional(), error: z.string().optional(),
+});
+
+export const snapshotSchema = commandJobBaseSchema.extend({
   createdAt: z.number(), cursor: z.number().int().nonnegative(), program: z.string().optional(),
   nextSequence: z.number().int().nonnegative().optional(), stdinOpen: z.boolean().optional(), reset: z.literal(true).optional(),
   output: z.array(z.object({ stream: z.enum(["stdout", "stderr"]), data: z.string().max(87384) })).default([]),
-  httpStatus: z.number().int().min(100).max(599).optional(), result: z.unknown().optional(), error: z.string().optional(),
 });
 type CommandSnapshot = z.infer<typeof snapshotSchema>;
 
@@ -35,14 +38,8 @@ function validateCursor(value: CommandSnapshot, requestedCursor: number): void {
 }
 function commandFailure(snapshot: CommandSnapshot): never {
   if (snapshot.state === "unknown") throw new PuteredError(snapshot.error ?? "Command outcome is unknown.", "CONFLICT");
-  if (snapshot.state === "failed") {
-    const saved = z.object({ error: z.string(), code: z.string().optional() }).safeParse(snapshot.result);
-    const savedCode = saved.success && saved.data.code ? z.enum(ERROR_CODES).safeParse(saved.data.code) : undefined;
-    throw new PuteredError(saved.success ? saved.data.error : snapshot.error ?? "Command execution failed.",
-      savedCode?.success ? savedCode.data : snapshot.httpStatus === undefined ? "EXECUTION_FAILED" : codeForStatus(snapshot.httpStatus), {
-        ...(snapshot.httpStatus === undefined ? {} : { status: snapshot.httpStatus }),
-      });
-  }
+  if (snapshot.state === "failed")
+    throw parseWireError(snapshot.result, snapshot.error ?? "Command execution failed.", snapshot.httpStatus);
   throw new PuteredError("Command is still running.", "PROTOCOL_ERROR");
 }
 
@@ -198,6 +195,15 @@ export function validateCommandPath(path: string | undefined, environmentId: str
   const expected = `/environments/${environmentId}/commands/${jobId}`;
   if (path !== undefined && path !== expected) throw new PuteredError("Command ticket path is invalid.", "PROTOCOL_ERROR");
   return path ?? `/execution-jobs/${jobId}`;
+}
+
+export function registerCommandTicket(transport: Transport, environmentId: string,
+  ticket: z.output<typeof commandTicketSchema>, requestId?: string): string {
+  if (requestId !== undefined && ticket.jobId !== requestId)
+    throw new PuteredError("Command ticket identity mismatch.", "PROTOCOL_ERROR");
+  const path = validateCommandPath(ticket.commandPath, environmentId, ticket.jobId);
+  transport.rememberCommandPath(environmentId, ticket.jobId, path);
+  return path;
 }
 
 export async function loadCommandHandle(transport: Transport, environmentId: string, id: string, options: GetCommandOptions = {}): Promise<CommandHandle> {

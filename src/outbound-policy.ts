@@ -61,18 +61,3 @@ export function redactOutboundPolicy(policy: OutboundPolicy): OutboundPolicy {
       for (const name of Object.keys(transform.headers)) transform.headers[name] = "<redacted>";
   return result;
 }
-export function outboundRules(policy: OutboundPolicy, hostname: string): OutboundRule[] | undefined {
-  if (typeof policy === "string") return policy === "allow-all" ? [] : undefined;
-  const entries = Array.isArray(policy.allow) ? policy.allow.map(host => [host, []] as const) : Object.entries(policy.allow);
-  const matches = entries.filter(([host]) => host === hostname || host === "*" || host.startsWith("*.") && hostname.endsWith(host.slice(1)));
-  // The exact host wins; otherwise the longest suffix wins, with * last.
-  matches.sort(([a], [b]) => Number(b === hostname) - Number(a === hostname) || b.length - a.length);
-  return matches[0]?.[1] as OutboundRule[] | undefined;
-}
-export function selectOutboundRule(rules: OutboundRule[], method: string, pathname: string): OutboundRule | undefined {
-  return rules.find(rule => {
-    if (!("transform" in rule) || !rule.match) return true;
-    return (!rule.match.method || rule.match.method.includes(method as never)) && (!rule.match.path ||
-      ("exact" in rule.match.path ? pathname === rule.match.path.exact : pathname.startsWith(rule.match.path.startsWith)));
-  });
-}

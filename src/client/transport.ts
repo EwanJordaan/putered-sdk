@@ -1,8 +1,7 @@
 import { createRequire } from "node:module";
 import { z } from "zod";
-import { encodeJson } from "../json.js";
-import { ERROR_CODES, PuteredError, codeForStatus } from "../errors.js";
-import { MAX_BYTES } from "../limits.js";
+import { MAX_BYTES, encodeJson } from "../json.js";
+import { ERROR_CODES, PuteredError, codeForStatus, type ErrorCode } from "../errors.js";
 const { version: sdkVersion } = createRequire(import.meta.url)("../../package.json") as { version: string };
 
 export class Transport {
@@ -82,13 +81,21 @@ export class Transport {
     try { value = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(Buffer.concat(chunks))); }
     catch (error) { throw new PuteredError(`Invalid JSON response from Putered (HTTP ${response.status}); execution was not retried.`,
       response.ok ? "PROTOCOL_ERROR" : codeForStatus(response.status), { cause: error, ...(response.ok ? {} : { status: response.status }) }); }
-    if (!response.ok) {
-      const error = z.object({ error: z.string(), code: z.string().optional() }).safeParse(value);
-      const code = error.success ? z.enum(ERROR_CODES).safeParse(error.data.code) : undefined;
-      throw new PuteredError(error.success ? error.data.error : "Putered request failed.",
-        code?.success ? code.data : codeForStatus(response.status), { status: response.status });
-    }
+    if (!response.ok) throw parseWireError(value, "Putered request failed.", response.status);
     try { return await schema.parseAsync(value); }
     catch (error) { throw new PuteredError("Putered response does not match its contract.", "PROTOCOL_ERROR", { cause: error }); }
   }
 }
+
+const wireErrorSchema = z.object({ error: z.string(), code: z.string().optional() });
+const errorCodeSchema = z.enum(ERROR_CODES);
+
+export function parseWireError(value: unknown, fallbackMessage: string, status?: number, fallbackCode?: ErrorCode): PuteredError {
+  const parsed = wireErrorSchema.safeParse(value);
+  const parsedCode = parsed.success && parsed.data.code ? errorCodeSchema.safeParse(parsed.data.code) : undefined;
+  const code = parsedCode?.success ? parsedCode.data
+    : status === undefined ? (fallbackCode ?? "EXECUTION_FAILED") : codeForStatus(status);
+  return new PuteredError(parsed.success ? parsed.data.error : fallbackMessage, code,
+    status === undefined ? {} : { status });
+}
+

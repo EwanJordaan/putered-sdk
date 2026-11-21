@@ -33,3 +33,15 @@ export function compileToolSchema(ajv: ReturnType<typeof toolValidator>, schema:
     throw new PuteredError("Async JSON Schema validators are not supported.", "PACKAGE_INVALID");
   return validate;
 }
+
+let sharedValidator: ReturnType<typeof toolValidator> | undefined;
+const compiledSchemas = new WeakMap<object, ValidateFunction>();
+
+export function cachedToolSchema(schema: Record<string, unknown>): ValidateFunction {
+  const existing = compiledSchemas.get(schema);
+  if (existing) return existing;
+  const validate = compileToolSchema(sharedValidator ??= toolValidator(), schema);
+  compiledSchemas.set(schema, validate);
+  return validate;
+}
+

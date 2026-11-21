@@ -1,17 +1,17 @@
 import { z } from "zod";
 import { Readable, Writable } from "node:stream";
 import { runCommandSchema, resourcesSchema, type EnvironmentRecord } from "../tool-contract.js";
-import { canonical, freezeRecord, type DeepReadonly } from "../tool-definition.js";
+import { freezeRecord, type DeepReadonly } from "../tool-definition.js";
 import { PuteredError } from "../errors.js";
 import { samePersistence, type Persistence } from "../persistence-contract.js";
-import { redactOutboundPolicy, updateEnvironmentSchema, type OutboundPolicy } from "../outbound-policy.js";
+import { updateEnvironmentSchema, type OutboundPolicy } from "../outbound-policy.js";
 import type { Transport } from "./transport.js";
-import { callOptions, inputContract, mergeResources, type CallOptions } from "./input-contract.js";
+import { assertEnvAndOutboundPolicy, callOptions, inputContract, mergeResources, type CallOptions } from "./input-contract.js";
 import { asyncExecution } from "./execution.js";
 import { commandResult, type CommandResult } from "./command-output.js";
 import {
   CommandHandle, commandTicketSchema, loadCommandHandle, pipeCommand,
-  pumpCommandInput, pumpCommandOutput, validateCommandPath, type GetCommandOptions,
+  pumpCommandInput, pumpCommandOutput, registerCommandTicket, type GetCommandOptions,
 } from "./commands.js";
 import { capturePreset, type CapturePresetOptions } from "./presets.js";
 import { EnvironmentTerminals } from "./terminals.js";
@@ -27,7 +27,13 @@ export type RunOptions = RunOptionsBase & (
   { stdin?: string | Uint8Array | Readable; detached?: boolean } |
   { stdin: true; detached: true }
 );
-export interface ExecResult extends CommandResult {}
+export type ExecResult = CommandResult;
+
+function assertBooleanFlags(options: Record<string, unknown>, names: readonly string[]): void {
+  for (const name of names)
+    if (options[name] !== undefined && typeof options[name] !== "boolean")
+      throw new PuteredError(`${name} must be a boolean.`, "INVALID_INPUT");
+}
 
 /** Caller IDs are supported by the direct server and force async submission. */
 function recoveryOptions(options: { requestId?: string; async?: boolean }): { requestId?: string } {
@@ -92,10 +98,7 @@ export class Environment {
     const request = inputContract(updateEnvironmentSchema, value);
     const record = await this.transport.request(`/environments/${this.id}`, "PATCH", environmentResponseSchema, request, options.signal);
     if (record.id !== this.id) throw new PuteredError("Environment response identity mismatch.", "PROTOCOL_ERROR");
-    if (request.env !== undefined && canonical(record.env ?? null) !== canonical(request.env))
-      throw new PuteredError("Environment response does not preserve the requested environment variables.", "PROTOCOL_ERROR");
-    if (request.networkPolicy !== undefined && canonical(record.networkPolicy ?? null) !== canonical(redactOutboundPolicy(request.networkPolicy)))
-      throw new PuteredError("Environment response does not preserve the requested outbound network policy.", "PROTOCOL_ERROR");
+    assertEnvAndOutboundPolicy(request, record);
     Object.assign(this.record, record);
     return this;
   }
@@ -109,10 +112,7 @@ export class Environment {
   async exec(command: string, options: ExecOptions = {}): Promise<ExecResult> {
     if (typeof command !== "string" || !command.trim() || Buffer.byteLength(command) > 64 * 1024)
       throw new PuteredError("Command must be nonempty and no larger than 64 KiB.", "INVALID_INPUT");
-    if (options.async !== undefined && typeof options.async !== "boolean")
-      throw new PuteredError("async must be a boolean.", "INVALID_INPUT");
-    if (options.check !== undefined && typeof options.check !== "boolean")
-      throw new PuteredError("check must be a boolean.", "INVALID_INPUT");
+    assertBooleanFlags(options as Record<string, unknown>, ["async", "check"]);
     const input = {
       command,
       ...recoveryOptions(options),
@@ -128,12 +128,7 @@ export class Environment {
   run(program: string, args?: readonly string[], options?: RunOptions): Promise<ExecResult | CommandHandle>;
   async run(program: string, args: readonly string[] = [], options: RunOptions = {}): Promise<ExecResult | CommandHandle> {
     const openStdin = options.stdin === true || options.stdin instanceof Readable;
-    if (options.async !== undefined && typeof options.async !== "boolean")
-      throw new PuteredError("async must be a boolean.", "INVALID_INPUT");
-    if (options.check !== undefined && typeof options.check !== "boolean")
-      throw new PuteredError("check must be a boolean.", "INVALID_INPUT");
-    if (options.detached !== undefined && typeof options.detached !== "boolean")
-      throw new PuteredError("detached must be a boolean.", "INVALID_INPUT");
+    assertBooleanFlags(options as Record<string, unknown>, ["async", "check", "detached"]);
     if (options.stdin === true && options.detached !== true)
       throw new PuteredError("stdin: true requires detached: true so the command can be written interactively.", "INVALID_INPUT");
     if (options.stdin !== undefined && options.stdin !== true && typeof options.stdin !== "string" &&
@@ -146,7 +141,7 @@ export class Environment {
       throw new PuteredError("Sudo was not enabled for this environment.", "POLICY_DENIED");
     if (options.sudo && program === "git")
       throw new PuteredError("Sudo is unsupported for direct Wasm Git.", "INVALID_INPUT");
-    if (program === "git" && (options.stdin === true || options.stdin instanceof Readable))
+    if (program === "git" && openStdin)
       throw new PuteredError("Interactive stdin is unsupported for direct Wasm Git.", "INVALID_INPUT");
     const stdinBytes = typeof options.stdin === "string" ? Buffer.from(options.stdin)
       : options.stdin instanceof Uint8Array ? Buffer.from(options.stdin) : undefined;
@@ -164,8 +159,7 @@ export class Environment {
       ...recoveryOptions(options),
       ...this.executionOptions(options),
     };
-    const interactive = options.detached === true || options.stdout !== undefined || options.stderr !== undefined ||
-      openStdin || (options.stdin !== undefined && !stdinBytes);
+    const interactive = options.detached === true || options.stdout !== undefined || options.stderr !== undefined || openStdin;
     if (interactive) {
       const handle = await this.startRun(input, options);
       if (options.detached) return handle;
@@ -181,10 +175,7 @@ export class Environment {
     const ticket = await this.transport.request(
       `/environments/${this.id}/run?async=1`, "POST", commandTicketSchema, input, options.signal,
     );
-    if (input.requestId !== undefined && ticket.jobId !== input.requestId)
-      throw new PuteredError("Command ticket identity mismatch.", "PROTOCOL_ERROR");
-    const path = validateCommandPath(ticket.commandPath, this.id, ticket.jobId);
-    this.transport.rememberCommandPath(this.id, ticket.jobId, path);
+    const path = registerCommandTicket(this.transport, this.id, ticket, input.requestId as string | undefined);
     const handle = new CommandHandle(this.transport, this.id, ticket.jobId, path, input.program as string,
       false, 0, input.stdinOpen === true);
     if (options.signal) {

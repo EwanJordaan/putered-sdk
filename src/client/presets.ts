@@ -4,11 +4,14 @@ import { open, lstat, link, mkdtemp, rm, type FileHandle } from "node:fs/promise
 import { dirname, join, resolve } from "node:path";
 import { createHash, randomUUID } from "node:crypto";
 import { Readable } from "node:stream";
+import { setTimeout as delay } from "node:timers/promises";
 import { capturePresetSchema, captureScope, presetIdSchema, presetNameSchema,
   PRESET_MAX_BYTES, type Preset } from "../preset-contract.js";
 import { environmentSchema } from "../tool-contract.js";
 import { PuteredError } from "../errors.js";
 import type { Transport } from "./transport.js";
+import { readExactChunk } from "./asset-files.js";
+import { inputContract } from "./input-contract.js";
 import { presetResponseSchema } from "./responses.js";
 
 const archiveType = "application/vnd.oci.image.layout.v1+tar";
@@ -24,10 +27,6 @@ export type CapturePresetOptions = PresetRequestOptions & { name: string } & (
   { mode: "state"; workspace?: string[]; home?: string[] }
 );
 
-function input<S extends z.ZodType>(schema: S, value: unknown): z.output<S> {
-  try { return schema.parse(value); }
-  catch (error) { throw new PuteredError("Invalid preset options.", "INVALID_INPUT", { cause: error }); }
-}
 function cancelled(signal?: AbortSignal) {
   if (signal?.aborted) throw new PuteredError("Preset request cancelled; publication may already have completed.", "CANCELLED");
 }
@@ -35,6 +34,11 @@ function pathInput(path: string) {
   if (typeof path !== "string" || !path.trim() || path.includes("\0"))
     throw new PuteredError("Supply a nonempty file path.", "INVALID_INPUT");
   return resolve(path);
+}
+function verifyUploadedPreset(result: Preset, sha256: string, totalBytes: number, name: string, message: string): Preset {
+  if (result.archiveSha256 !== sha256 || result.bytes !== totalBytes || result.name !== name || result.source !== "upload")
+    throw new PuteredError(message, "PROTOCOL_ERROR");
+  return result;
 }
 const operationSchema = z.object({
   id: z.string().uuid(),
@@ -58,20 +62,8 @@ async function waitOperation(transport: Transport, id: string, signal?: AbortSig
       throw new PuteredError(`${message}. Inspect operation ${id} before retrying.`,
         operation.state === "unknown" ? "CONFLICT" : "PACKAGE_INVALID");
     }
-    await new Promise<void>((resolve, reject) => {
-      const done = () => {
-        signal?.removeEventListener("abort", abort);
-        resolve();
-      };
-      const timer = setTimeout(done, 1000);
-      const abort = () => {
-        clearTimeout(timer);
-        signal?.removeEventListener("abort", abort);
-        reject(new PuteredError(`Cancelled; inspect operation ${id} before retrying.`, "CANCELLED"));
-      };
-      signal?.addEventListener("abort", abort, { once: true });
-      if (signal?.aborted) abort();
-    });
+    try { await delay(1000, undefined, { signal }); }
+    catch { throw new PuteredError(`Cancelled; inspect operation ${id} before retrying.`, "CANCELLED"); }
   }
   throw new PuteredError(`Image operation is still pending. Inspect ${id} before retrying.`, "TIMEOUT");
 }
@@ -93,13 +85,8 @@ async function uploadArchiveParts(transport: Transport, file: FileHandle, name: 
 
   while (completedBytes < totalBytes) {
     cancelled(options.signal);
-    const bytes = Buffer.allocUnsafe(Math.min(chunkBytes, totalBytes - completedBytes));
-    let read = 0;
-    while (read < bytes.length) {
-      const next = await file.read(bytes, read, bytes.length - read, completedBytes + read);
-      if (!next.bytesRead) throw new PuteredError("Archive changed during upload.", "INVALID_INPUT");
-      read += next.bytesRead;
-    }
+    const bytes = await readExactChunk(file, completedBytes, Math.min(chunkBytes, totalBytes - completedBytes),
+      "Archive changed during upload.");
     const index = Math.floor(completedBytes / chunkBytes);
     const hash = createHash("sha256").update(bytes).digest("hex");
     const part = await transport.request(`/preset-operations/${id}/parts/${index}`, "PUT",
@@ -113,15 +100,13 @@ async function uploadArchiveParts(transport: Transport, file: FileHandle, name: 
   const completed = await transport.request(`/preset-operations/${id}/complete`, "POST", operationSchema, {}, options.signal);
   if (completed.id !== id) throw new PuteredError("Operation ID mismatch.", "PROTOCOL_ERROR");
   const result = await waitOperation(transport, id, options.signal);
-  if (result.archiveSha256 !== digest.digest("hex") || result.bytes !== totalBytes || result.name !== name || result.source !== "upload")
-    throw new PuteredError("Uploaded image mismatch.", "PROTOCOL_ERROR");
-  return result;
+  return verifyUploadedPreset(result, digest.digest("hex"), totalBytes, name, "Uploaded image mismatch.");
 }
 
 export async function capturePreset(transport: Transport, environmentId: string, options: CapturePresetOptions): Promise<Preset> {
-  input(environmentSchema.shape.id, environmentId);
+  inputContract(environmentSchema.shape.id, environmentId);
   const { signal, onOperation, ...value } = options;
-  const request = input(capturePresetSchema, value);
+  const request = inputContract(capturePresetSchema, value);
   const scope = captureScope(request);
   if (scope !== "state" && (request.workspace.length || request.home.length))
     throw new PuteredError("Save scopes do not accept workspace/home selections.", "INVALID_INPUT");
@@ -152,7 +137,7 @@ export async function capturePreset(transport: Transport, environmentId: string,
 export class Presets {
   constructor(private readonly transport: Transport) {}
   async operation(id: string, options: PresetRequestOptions = {}) {
-    input(z.string().uuid(), id);
+    inputContract(z.string().uuid(), id);
     cancelled(options.signal);
     const record = await this.transport.request(`/preset-operations/${id}`, "GET", operationSchema, undefined, options.signal);
     if (record.id !== id) throw new PuteredError("Operation ID mismatch.", "PROTOCOL_ERROR");
@@ -163,13 +148,13 @@ export class Presets {
     return this.transport.request("/presets", "GET", z.array(presetResponseSchema), undefined, options.signal);
   }
   async get(id: string, options: PresetRequestOptions = {}): Promise<Preset> {
-    input(presetIdSchema, id); cancelled(options.signal);
+    inputContract(presetIdSchema, id); cancelled(options.signal);
     const result = await this.transport.request(`/presets/${id}`, "GET", presetResponseSchema, undefined, options.signal);
     if (result.id !== id) throw new PuteredError("Preset response ID mismatch.", "PROTOCOL_ERROR");
     return result;
   }
   async upload(options: PresetUploadOptions): Promise<Preset> {
-    const name = input(presetNameSchema, options.name);
+    const name = inputContract(presetNameSchema, options.name);
     const path = pathInput(options.file);
     cancelled(options.signal);
     let file;
@@ -203,10 +188,10 @@ export class Presets {
       })());
       const result = await this.transport.upload(`/presets?name=${encodeURIComponent(name)}`, presetResponseSchema, stream,
         archiveType, stat.size, options.signal);
-      if (completedBytes !== stat.size || result.archiveSha256 !== digest.digest("hex") || result.bytes !== stat.size ||
-        result.name !== name || result.source !== "upload")
+      if (completedBytes !== stat.size)
         throw new PuteredError("Uploaded preset does not match the supplied archive.", "PROTOCOL_ERROR");
-      return result;
+      return verifyUploadedPreset(result, digest.digest("hex"), stat.size, name,
+        "Uploaded preset does not match the supplied archive.");
     } catch (error) {
       cancelled(options.signal);
       if (error instanceof PuteredError) throw error;
@@ -215,7 +200,7 @@ export class Presets {
   }
   /** Stream into a private staging file; publish only after checksum verification, never overwriting a destination. */
   async download(id: string, options: PresetDownloadOptions): Promise<Preset> {
-    input(presetIdSchema, id);
+    inputContract(presetIdSchema, id);
     const destination = pathInput(options.destination);
     cancelled(options.signal);
     try {

@@ -3,7 +3,7 @@ import { artifactId, toolIdSchema, toolOptionsSchema, type EnvironmentRecord, ty
 import { canonical, freezeRecord, jsonValue, type DeepReadonly, type Json, type ToolMap, type ToolPlugin } from "../tool-definition.js";
 import { packageOf } from "../tool-artifact.js";
 import { PuteredError } from "../errors.js";
-import { compileToolSchema, toolValidator } from "../tool-validation.js";
+import { cachedToolSchema } from "../tool-validation.js";
 import type { Transport } from "./transport.js";
 import { callOptions, inputContract, mergeResources, type CallOptions } from "./input-contract.js";
 import { storedToolResponseSchema, toolCallResponseSchema } from "./responses.js";
@@ -55,9 +55,8 @@ export class EnvironmentTools {
     if (!this.record.tools.includes(reference.id)) throw new PuteredError("Tool is not attached to this environment.", "POLICY_DENIED");
     if (!Object.hasOwn(reference.manifest.tools, name)) throw new PuteredError("Unknown tool.", "NOT_FOUND");
     const definition = reference.manifest.tools[name];
-    const ajv = toolValidator();
-    const validateInput = compileToolSchema(ajv, definition.inputSchema);
-    const validateOutput = compileToolSchema(ajv, definition.outputSchema);
+    const validateInput = cachedToolSchema(definition.inputSchema);
+    const validateOutput = cachedToolSchema(definition.outputSchema);
     const value = jsonValue(input);
     if (!validateInput(value)) throw new PuteredError("Tool input does not match its schema.", "INVALID_INPUT");
     const resources = mergeResources(this.configResources, this.record.settings.resources, options.resources);

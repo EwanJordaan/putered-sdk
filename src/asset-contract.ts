@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { createHash } from "node:crypto";
+import { PuteredError } from "./errors.js";
 import { canonical } from "./json.js";
 
 export const ASSET_CHUNK_BYTES = 4 * 1024 * 1024;
@@ -54,9 +55,6 @@ export function assetId(manifest: AssetManifest): string {
   return `asset_${createHash("sha256").update(canonical({ ...manifest,
     files: [...manifest.files].sort((a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0) })).digest("hex")}`;
 }
-export function assetReference(manifest: AssetManifest): AssetReference {
-  return { id: assetId(manifest), platform: manifest.platform, entrypoints: manifest.entrypoints };
-}
 export const assetUploadSchema = z.strictObject({
   id: assetIdSchema, state: z.enum(["uploading", "validating", "ready", "failed"]),
   manifest: assetManifestSchema, offsets: z.record(z.string(), z.number().int().min(0)),
@@ -67,3 +65,19 @@ export const assetSummarySchema = z.strictObject({
   ...assetReferenceSchema.shape, state: assetUploadSchema.shape.state,
   totalBytes: z.number().int().min(0).max(ASSET_MAX_BYTES), error: z.string().optional(),
 });
+
+/** A reference to uploaded bytes; schemas and handlers remain in local source. */
+export function defineAsset<const K extends string>(reference: AssetReference<K>): AssetReference<K> {
+  try {
+    const value = assetReferenceSchema.parse(reference);
+    return Object.freeze({ ...value, entrypoints: Object.freeze(value.entrypoints) }) as AssetReference<K>;
+  } catch (error) { throw new PuteredError("Invalid stored asset reference.", "PACKAGE_INVALID", { cause: error }); }
+}
+export interface AssetExecOptions {
+  cwd?: string;
+  env?: Readonly<Record<string, string>>;
+  stdin?: string | Uint8Array;
+}
+export interface AssetExecResult { stdout: string; stderr: string; stdoutBase64: string; exitCode: number }
+export type AssetExecutor = <const K extends string>(asset: AssetReference<K>, entrypoint: NoInfer<K>,
+  args?: readonly string[], options?: AssetExecOptions) => Promise<AssetExecResult>;

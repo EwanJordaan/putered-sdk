@@ -1,11 +1,9 @@
 import { z } from "zod";
 import { jsonValue } from "./json.js";
 import { PuteredError } from "./errors.js";
-import { defineAsset, type AssetExecutor } from "./asset-definition.js";
-import type { AssetReference } from "./asset-contract.js";
-export { defineAsset } from "./asset-definition.js";
-export type { AssetReference, AssetPlatform } from "./asset-contract.js";
-export type { AssetExecOptions, AssetExecResult } from "./asset-definition.js";
+import { defineAsset, type AssetExecutor, type AssetReference } from "./asset-contract.js";
+export { defineAsset } from "./asset-contract.js";
+export type { AssetReference, AssetPlatform, AssetExecOptions, AssetExecResult } from "./asset-contract.js";
 export { canonical, jsonValue } from "./json.js";
 export type { Json } from "./json.js";
 
