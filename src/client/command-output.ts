@@ -12,9 +12,15 @@ export class CommandError extends PuteredError {
   readonly exitCode: number;
   readonly result: CommandResult;
   constructor(result: CommandResult) {
+    const limitMiB = result.allocationUsage ? Math.round(result.allocationUsage.memoryBytes / 1024 ** 2) : undefined;
     super(result.memoryLimitExceeded
-      ? `Command exceeded its memory limit (exit code ${result.exitCode}).`
-      : `Command exited with code ${result.exitCode}.`, "EXECUTION_FAILED");
+      ? limitMiB !== undefined
+        ? `Command exceeded its ${limitMiB} MiB memory limit (exit code ${result.exitCode}). Pass resources: { memoryMiB } (64 MiB increments) to increase it.`
+        : `Command exceeded its memory limit (exit code ${result.exitCode}). Pass resources: { memoryMiB } (64 MiB increments) to increase it.`
+      : `Command exited with code ${result.exitCode}.`, "EXECUTION_FAILED", {
+      ...(result.memoryLimitExceeded ? { memoryLimitExceeded: true } : {}),
+      ...(result.allocationUsage ? { allocationUsage: result.allocationUsage } : {}),
+    });
     this.name = "CommandError";
     this.output = result.stdout + result.stderr;
     this.stdout = result.stdout;

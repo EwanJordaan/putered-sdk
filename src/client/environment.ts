@@ -68,6 +68,14 @@ export class Environment {
   get networkPolicy(): DeepReadonly<OutboundPolicy> | undefined {
     return this.record.networkPolicy === undefined ? undefined : freezeRecord(structuredClone(this.record.networkPolicy));
   }
+  /** Execution backend preferences stored with this environment. */
+  get execution(): DeepReadonly<EnvironmentRecord["execution"]> | undefined {
+    return this.record.execution === undefined ? undefined : freezeRecord(structuredClone(this.record.execution));
+  }
+  /** Default resource limits (CPU/RAM) configured for this environment. */
+  get resources(): DeepReadonly<EnvironmentRecord["settings"]["resources"]> | undefined {
+    return this.record.settings.resources === undefined ? undefined : freezeRecord(structuredClone(this.record.settings.resources));
+  }
   private executionOptions(options: CallOptions) {
     const resources = mergeResources(this.configResources, this.record.settings.resources, options.resources);
     return callOptions({ ...options, ...(Object.keys(resources).length ? { resources } : {}) });
@@ -139,10 +147,11 @@ export class Environment {
         throw new PuteredError("stdout and stderr must be writable streams.", "INVALID_INPUT");
     if (options.sudo && !this.record.settings.execution?.allowSudo)
       throw new PuteredError("Sudo was not enabled for this environment.", "POLICY_DENIED");
-    if (options.sudo && program === "git")
-      throw new PuteredError("Sudo is unsupported for direct Wasm Git.", "INVALID_INPUT");
-    if (program === "git" && openStdin)
-      throw new PuteredError("Interactive stdin is unsupported for direct Wasm Git.", "INVALID_INPUT");
+    const gitBackend = this.record.execution?.programs?.git ?? this.record.execution?.default ?? "auto";
+    if (program === "git" && (gitBackend === "v8" || gitBackend === "auto")) {
+      if (options.sudo) throw new PuteredError("Sudo is unsupported for direct Wasm Git. Select native execution for git.", "INVALID_INPUT");
+      if (openStdin) throw new PuteredError("Interactive stdin is unsupported for direct Wasm Git. Select native execution for git.", "INVALID_INPUT");
+    }
     const stdinBytes = typeof options.stdin === "string" ? Buffer.from(options.stdin)
       : options.stdin instanceof Uint8Array ? Buffer.from(options.stdin) : undefined;
     if (stdinBytes && stdinBytes.byteLength > 64 * 1024)

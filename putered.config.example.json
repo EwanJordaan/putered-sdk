@@ -6,5 +6,5 @@
       "git": "v8"
     }
   },
-  "resources": { "cpu": 1, "memoryMiB": 1024 }
+  "resources": { "cpu": 1 }
 }

@@ -64,10 +64,14 @@ test('resource defaults, per-call partial overrides, queue timeout, and validati
   assert.equal(calls[1].body.queueTimeoutMs, 30000);
   assert.deepEqual(calls[2].body.resources, resources);
   const before = calls.length;
-  for (const invalid of [{ cpu: 0.1 }, { cpu: 1.1 }, { memoryMiB: 300 }, { memoryMiB: 9000 }, null, [], 'bad'])
+  for (const invalid of [{ cpu: 0.1 }, { cpu: 1.1 }, { memoryMiB: 64 }, { memoryMiB: 300 }, { memoryMiB: 9000 }, null, [], 'bad'])
     await assert.rejects(env.exec('true', { resources: invalid }), error => error.code === 'INVALID_INPUT');
   await assert.rejects(env.exec('true', { queueTimeoutMs: 0 }), error => error.code === 'INVALID_INPUT');
   assert.equal(calls.length, before);
+  await env.exec('true', { resources: { memoryMiB: 128 } });
+  assert.deepEqual(calls.at(-1).body.resources, { cpu: 1, memoryMiB: 128 });
+  await env.exec('true', { resources: { memoryMiB: 192 } });
+  assert.deepEqual(calls.at(-1).body.resources, { cpu: 1, memoryMiB: 192 });
 });
 
 test('connect fills missing resource defaults from config while saved settings win', async () => {
@@ -102,4 +106,69 @@ test('partial config and saved resource fields merge for create and tool calls',
   await connected.tools.call(reference, 'echo', {}, { resources: { cpu: 2 } });
   assert.deepEqual(requests.at(-1).body.resources, { cpu: 2, memoryMiB: 2048 });
   assert.deepEqual(created.describe().settings.resources, { cpu: 1, memoryMiB: 2048 });
+  assert.deepEqual(created.resources, { cpu: 1, memoryMiB: 2048 });
+});
+
+test('unified putered.config.json accepts workspace typescript/native keys alongside SDK keys and formats validation errors', () => {
+  const sdk = new Putered({
+    apiKey: 'x'.repeat(32),
+    config: { version: 1, typescript: { compiler: 'ts-rust-beta' }, persistence: 'workspace', resources: { cpu: 1 } },
+  });
+  assert.ok(sdk);
+  assert.throws(
+    () => new Putered({ apiKey: 'x'.repeat(32), config: { resources: { memoryMiB: 200 } } }),
+    error => error.code === 'INVALID_INPUT' && /memoryMiB/.test(error.message),
+  );
+});
+
+test('wire OOM errors preserve allocationUsage/memoryLimitExceeded and CommandError reports enforced MiB ceiling', async () => {
+  const { CommandError } = await import('../dist/client/sdk.js');
+  const sdk = new Putered({
+    apiKey: 'x'.repeat(32),
+    config: {},
+    fetch: async (url) => {
+      if (String(url).endsWith('/environments/env_oom'))
+        return Response.json({ id: 'env_oom', tools: [], settings: {} });
+      if (String(url).endsWith('/exec'))
+        return Response.json({
+          error: 'Execution exceeded its 128 MiB RAM limit.',
+          code: 'EXECUTION_FAILED',
+          memoryLimitExceeded: true,
+          allocationUsage: { enforced: true, durationMs: 50, cpuQuotaMicros: 100000, memoryBytes: 128 * 1024 ** 2, cpuMicros: 12000 },
+        }, { status: 500 });
+      return Response.json({
+        stdout: '', stdoutBase64: '', stderr: '', exitCode: 137, durationMs: 50, hostDurationMs: 55,
+        memoryLimitExceeded: true,
+        allocationUsage: { enforced: true, durationMs: 50, cpuQuotaMicros: 100000, memoryBytes: 256 * 1024 ** 2, cpuMicros: 20000 },
+      });
+    },
+  });
+  const env = await sdk.environments.connect('env_oom');
+  await assert.rejects(
+    env.exec('node oom.js'),
+    error => error.memoryLimitExceeded === true && error.allocationUsage?.memoryBytes === 128 * 1024 ** 2,
+  );
+  await assert.rejects(
+    env.run('node', ['oom.js']),
+    error => error instanceof CommandError && /256 MiB memory limit/.test(error.message) && error.memoryLimitExceeded === true,
+  );
+});
+
+test('native git allows interactive stdin/sudo while V8 git rejects them client-side', async () => {
+  const sdk = new Putered({
+    apiKey: 'x'.repeat(32),
+    config: {},
+    fetch: async (url, options) => {
+      if (String(url).endsWith('/environments/env_v8git'))
+        return Response.json({ id: 'env_v8git', tools: [], execution: { default: 'native', programs: { git: 'v8' } }, settings: { execution: { mode: 'auto', allowSudo: true } } });
+      if (String(url).endsWith('/environments/env_natgit'))
+        return Response.json({ id: 'env_natgit', tools: [], execution: { default: 'native' }, settings: { execution: { mode: 'auto', allowSudo: true } } });
+      return Response.json({ stdout: 'ok\n', stdoutBase64: Buffer.from('ok\n').toString('base64'), stderr: '', exitCode: 0, durationMs: 1, hostDurationMs: 1 });
+    },
+  });
+  const v8Env = await sdk.environments.connect('env_v8git');
+  await assert.rejects(v8Env.run('git', ['status'], { sudo: true }), error => error.code === 'INVALID_INPUT' && /Wasm Git/.test(error.message));
+  const natEnv = await sdk.environments.connect('env_natgit');
+  const res = await natEnv.run('git', ['status'], { sudo: true });
+  assert.equal(res.stdout, 'ok\n');
 });

@@ -29,14 +29,27 @@ export function codeForStatus(status: number): ErrorCode {
     520: "NETWORK_ERROR", 521: "NETWORK_ERROR", 522: "TIMEOUT", 523: "NETWORK_ERROR",
     524: "TIMEOUT", 525: "NETWORK_ERROR", 526: "NETWORK_ERROR" } as Record<number, ErrorCode>)[status] ?? "INTERNAL_ERROR";
 }
+export interface ErrorAllocationUsage {
+  enforced: true;
+  durationMs: number;
+  cpuQuotaMicros: number;
+  memoryBytes: number;
+  cpuMicros?: number;
+}
 export class PuteredError extends Error {
   readonly code: ErrorCode;
   readonly status: number;
+  readonly memoryLimitExceeded?: boolean;
+  readonly allocationUsage?: ErrorAllocationUsage;
+  readonly containmentUncertain?: boolean;
   constructor(message: string, codeOrStatus: ErrorCode | number = "INTERNAL_ERROR",
-    options: { status?: number; cause?: unknown } = {}) {
+    options: { status?: number; cause?: unknown; memoryLimitExceeded?: boolean; allocationUsage?: ErrorAllocationUsage; containmentUncertain?: boolean } = {}) {
     super(message, { cause: options.cause });
     this.name = "PuteredError";
     this.code = typeof codeOrStatus === "number" ? codeForStatus(codeOrStatus) : codeOrStatus;
     this.status = options.status ?? (typeof codeOrStatus === "number" ? codeOrStatus : errorStatus(this.code));
+    if (options.memoryLimitExceeded) this.memoryLimitExceeded = true;
+    if (options.allocationUsage) this.allocationUsage = options.allocationUsage;
+    if (options.containmentUncertain) this.containmentUncertain = true;
   }
 }

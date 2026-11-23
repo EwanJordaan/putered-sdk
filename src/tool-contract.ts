@@ -10,7 +10,7 @@ import { environmentVariablesSchema, outboundPolicySchema, outboundPolicyWriteSc
 const name = z.string().refine(validName);
 export const resourcesSchema = z.strictObject({
   cpu: z.number().min(0.25).max(8).multipleOf(0.25).optional(),
-  memoryMiB: z.number().int().min(256).max(8192).multipleOf(256).optional(),
+  memoryMiB: z.number().int().min(128).max(8192).multipleOf(64).optional(),
 });
 export const resourceOverridesSchema = resourcesSchema;
 const schema = z.record(z.string(), z.unknown());

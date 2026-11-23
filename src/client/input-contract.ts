@@ -13,9 +13,20 @@ export interface CallOptions {
   signal?: AbortSignal;
 }
 
+export function formatZodError(error: unknown, fallback: string): string {
+  if (error instanceof z.ZodError) {
+    const issue = error.issues[0];
+    if (issue) {
+      const where = issue.path.length ? `${issue.path.join(".")}: ` : "";
+      return `Invalid ${where}${issue.message}`;
+    }
+  }
+  return fallback;
+}
+
 export function inputContract<S extends z.ZodType>(schema: S, value: unknown): z.output<S> {
   try { return schema.parse(value); }
-  catch (error) { throw new PuteredError("Input does not match the SDK contract.", "INVALID_INPUT", { cause: error }); }
+  catch (error) { throw new PuteredError(formatZodError(error, "Input does not match the SDK contract."), "INVALID_INPUT", { cause: error }); }
 }
 
 /** Validate each override before merging, and treat explicit undefined as omission. */

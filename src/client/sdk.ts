@@ -23,7 +23,12 @@ export type { CommandSignal, OutputChunk, OutputBytesChunk, LogOptions, GetComma
 export { TerminalSession } from "./terminals.js";
 export type { TerminalState } from "./terminals.js";
 export { PuteredError, ERROR_CODES } from "../errors.js";
-export type { ErrorCode } from "../errors.js";
+export type { ErrorCode, ErrorAllocationUsage } from "../errors.js";
+export type { EnvironmentRecord } from "../tool-contract.js";
+export type Resources = z.input<typeof import("../tool-contract.js").resourcesSchema>;
+export type ExecutionPreference = z.input<typeof import("../tool-contract.js").executionPreferenceSchema>;
+export type EnvironmentSettings = z.input<typeof import("../tool-contract.js").environmentSettingsSchema>;
+export type AllocationUsage = NonNullable<z.infer<typeof import("./responses.js").execResultSchema>["allocationUsage"]>;
 export type { AssetReference, AssetPlatform } from "../asset-contract.js";
 export type { AssetUploadOptions } from "./assets.js";
 export type { Preset, PresetSaveScope } from "../preset-contract.js";

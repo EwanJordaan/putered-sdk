@@ -1,7 +1,8 @@
 import { client } from './client.js';
 
 const environment = await client.environments.create({
-  settings: { saveScope: 'workspace-only', network: { mode: 'disabled' } },
+  persistence: 'workspace',
+  settings: { network: { mode: 'disabled' } },
 });
 console.log('Environment ID:', environment.id);
 // The SDK submits once and polls the job. This is still one command execution.
