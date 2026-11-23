@@ -3,17 +3,25 @@ import { z } from "zod";
 import { environmentSettingsSchema, executionPreferenceSchema, resourcesSchema } from "../tool-contract.js";
 import { PuteredError } from "../errors.js";
 import { persistenceSchema } from "../persistence-contract.js";
+import { formatZodError } from "./input-contract.js";
 
 export const SDK_CONFIG_FILE = "putered.config.json";
-const schema = z.strictObject({ network: environmentSettingsSchema.shape.network, persistence: persistenceSchema.optional(),
-  execution: executionPreferenceSchema.optional(), resources: resourcesSchema.optional() });
+const schema = z.strictObject({
+  version: z.literal(1).optional(),
+  typescript: z.strictObject({ compiler: z.enum(["ts6", "ts-rust-beta"]).optional() }).optional(),
+  native: z.strictObject({ tools: z.unknown().optional() }).optional(),
+  network: environmentSettingsSchema.shape.network,
+  persistence: persistenceSchema.optional(),
+  execution: executionPreferenceSchema.optional(),
+  resources: resourcesSchema.optional(),
+});
 export type SdkConfig = z.input<typeof schema>;
 
 /** One local config per SDK client. No ancestor/global config or remote file access. */
 export function loadSdkConfig(value?: SdkConfig | string): SdkConfig {
   if (value !== undefined && typeof value !== "string") {
     try { return schema.parse(value); }
-    catch (cause) { throw new PuteredError("Invalid SDK config.", "INVALID_INPUT", { cause }); }
+    catch (cause) { throw new PuteredError(`Invalid SDK config: ${formatZodError(cause, "does not match schema.")}`, "INVALID_INPUT", { cause }); }
   }
   const path = value ?? SDK_CONFIG_FILE;
   let file: number;
@@ -30,6 +38,7 @@ export function loadSdkConfig(value?: SdkConfig | string): SdkConfig {
     if (size === bytes.length) throw new Error("SDK config exceeds 64 KiB.");
     return schema.parse(JSON.parse(bytes.subarray(0, size).toString("utf8")));
   } catch (cause) {
-    throw new PuteredError(`Invalid SDK config: ${path}`, "INVALID_INPUT", { cause });
+    const detail = cause instanceof z.ZodError ? formatZodError(cause, "invalid schema") : cause instanceof Error ? cause.message : "invalid config";
+    throw new PuteredError(`Invalid SDK config (${path}): ${detail}`, "INVALID_INPUT", { cause });
   } finally { closeSync(file); }
 }

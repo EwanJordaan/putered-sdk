@@ -76,8 +76,12 @@ preference. Each value can be `native`, `v8` or `auto`:
 The same object can be passed as `execution` to `environments.create()`; that
 explicit value overrides the config. This preference is distinct from
 `settings.execution`, which sets execution security policy. Per-program
-preferences apply to direct `run()` calls; they do not select backends for
-programs launched inside an `exec()` shell script. Git is currently the only direct program with a V8 backend; unsupported selections fail before execution. `exec()` uses the bash preference or the default, and V8 bash is not yet supported. Terminal sessions use native execution.
+preferences apply to direct `run()` calls; `exec()` uses the `bash` preference
+or `default`. V8 runners are available for `bash`, `sh`, `git`, `curl`, `sqlite3`,
+`npm`, `npx`, `node`, `esbuild`, `tsc` (supporting TS6 and optional `ts-rust-beta`
+via `putered.config.json`), `python3`, and 79 core utilities. Unsupported V8
+selections fail before execution without falling back to native. Terminal sessions
+use native execution.
 
 Explicit creation options override the config default; reconnect/resume preserve
 the stored policy. Read it through `environment.persistence`. There is no
@@ -196,21 +200,24 @@ methods; see [the OCI preset API contract](api-contract.md#assets-tools-and-oci-
 
 `putered.config.json` is read from the client process working directory.
 The SDK validates the file before making requests, and rejects malformed,
-oversized, missing explicit paths and unknown settings. It accepts `network`,
-`persistence`, `execution`, and `resources`. Resource defaults are applied when
-creating an environment; on connect they fill resource fields missing from the
-saved environment settings. Saved settings keep precedence. Resource requests
-support CPU from 0.25 to 8 in 0.25 increments and memory from 256 to 8192 MiB
-in 256 MiB increments. Hosted requests also obey plan limits: Plus up to 2 vCPU /
-2048 MiB, Pro up to 8 vCPU / 8192 MiB. Currently available sizes are capped at
-1 vCPU / 1024 MiB; larger requests are rejected rather than queued indefinitely.
-These options require the matching SDK and server builds.
+oversized, missing explicit paths and unknown settings. It accepts SDK client
+keys (`network`, `persistence`, `execution`, `resources`) and workspace keys
+(`version`, `typescript`, `native`) in the same file. Resource defaults are
+applied when creating an environment; on connect they fill resource fields
+missing from the saved environment settings. Saved settings keep precedence.
+Resource requests support CPU from `0.25` to `8` in `0.25` increments and memory
+from `128` to `8192 MiB` in `64 MiB` increments. **Omit `memoryMiB` to let V8
+runners automatically right-size to `128`, `256`, or `384 MiB`** (setting an
+explicit `memoryMiB` overrides automatic V8 tiering). Hosted requests also obey
+plan limits: Plus up to `2 vCPU / 2048 MiB`, Pro up to `8 vCPU / 8192 MiB`.
+Currently available sizes are capped at `1 vCPU / 1024 MiB`; larger requests are
+rejected rather than queued indefinitely.
 
 For example, save defaults in `putered.config.json`:
 
 ```json
 {
-  "resources": { "cpu": 0.5, "memoryMiB": 512 }
+  "resources": { "cpu": 0.5 }
 }
 ```
 
@@ -338,7 +345,7 @@ otherwise bundled. Native addons and system libraries are not provisioned by thi
 build helper. V8 packages reject external builtin imports. Their handler APIs are
 restricted further at execution time.
 
-Build tooling is isolated behind `putered/build`, which exports `buildPlugin`.
+Build tooling is isolated behind `@putered/sdk/build`, which exports `buildPlugin`.
 The runtime SDK (`@putered/sdk`), definitions (`@putered/sdk/plugins`) and artifact
 helper (`@putered/sdk/packaging`) do not import esbuild or TypeScript. Those packages are optional
 dependencies: install them on build machines; runtime installations can use
@@ -347,7 +354,7 @@ The standalone SDK has no server, shell, Python, PostgreSQL or S3 dependencies.
 The root development/server package still includes those server dependencies.
 
 ```ts
-import { buildPlugin } from 'putered/build';
+import { buildPlugin } from '@putered/sdk/build';
 await buildPlugin('./plugin.ts', './plugin.mjs');
 ```
 
@@ -392,7 +399,8 @@ tool names or inputs cannot broaden the inferred plugin map.
 ## Errors and JSON limits
 
 `PuteredError`, `ErrorCode` and the readonly `ERROR_CODES` list are exported from
-`putered`. Errors expose a stable `code`, HTTP `status` and optional local `cause`.
+`@putered/sdk`. Errors expose a stable `code`, HTTP `status`, optional OOM/usage
+metadata (`memoryLimitExceeded`, `allocationUsage`), and optional local `cause`.
 Use the code to distinguish bad input, execution failures, cancellation and policy
 decisions rather than matching message text:
 

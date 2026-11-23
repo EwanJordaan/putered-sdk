@@ -69,15 +69,15 @@ export function createVibesServer({ client, directory = project } = {}) {
         return send(200, { id: env.id });
       }
       const env = await current();
-      if (path === '/api/run') return send(200, await env.exec(input.command, { timeoutMs: 300000, signal: controller.signal }));
+      if (path === '/api/run') return send(200, await env.exec(input.command, { timeoutMs: 300000, signal: controller.signal, check: false }));
       const files = {};
       for (const name of ['index.html', 'main.jsx', 'style.css']) files[name] = await readFile(join(directory, 'app', name), 'utf8');
       files['package.json'] = JSON.stringify({ private: true, dependencies: { react: '19.2.0', 'react-dom': '19.2.0', esbuild: '0.25.12' } });
       const payload = Buffer.from(JSON.stringify(files)).toString('base64');
       const command = `mkdir -p /workspace/vibes && cd /workspace/vibes && node -e 'const fs=require("fs");for(const [name,text] of Object.entries(JSON.parse(Buffer.from("${payload}","base64"))))fs.writeFileSync(name,text)' && npm install --no-audit --no-fund && npx --no-install esbuild main.jsx --bundle --minify --outdir=dist && cp index.html dist/index.html`;
-      const result = await env.exec(command, { timeoutMs: 300000, signal: controller.signal });
+      const result = await env.exec(command, { timeoutMs: 300000, signal: controller.signal, check: false });
       if (result.exitCode !== 0) return send(200, { ...result, previewReady: false });
-      const read = await env.exec(`cd /workspace/vibes && node -e 'const fs=require("fs");const out={};for(const name of ["index.html","main.js","main.css"])out[name]=fs.readFileSync("dist/"+name,"utf8");process.stdout.write(JSON.stringify(out))'`, { timeoutMs: 30000, signal: controller.signal });
+      const read = await env.exec(`cd /workspace/vibes && node -e 'const fs=require("fs");const out={};for(const name of ["index.html","main.js","main.css"])out[name]=fs.readFileSync("dist/"+name,"utf8");process.stdout.write(JSON.stringify(out))'`, { timeoutMs: 300000, signal: controller.signal, check: false });
       if (read.exitCode !== 0) return send(200, { ...read, previewReady: false });
       const built = JSON.parse(read.stdout);
       await mkdir(join(state, 'preview'), { recursive: true });

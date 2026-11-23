@@ -4,7 +4,8 @@ import { client, quote } from './client.js';
 const jobs = ['alpha', 'beta', 'gamma'];
 const results = await Promise.allSettled(jobs.map(async name => {
   const environment = await client.environments.create({
-    settings: { saveScope: 'workspace-only', network: { mode: 'disabled' } },
+    persistence: 'workspace',
+    settings: { network: { mode: 'disabled' } },
   });
   try {
     const result = await environment.exec(`printf '%s\n' ${quote(name)}`);

@@ -184,8 +184,6 @@ export class CommandHandle {
   }
   async kill(signal: CommandSignal = "SIGTERM"): Promise<void> {
     if (!commandSignalSchema.safeParse(signal).success) throw new PuteredError("Unsupported command signal.", "INVALID_INPUT");
-    if (this.program === "git" && signal !== "SIGKILL")
-      throw new PuteredError("Direct Wasm Git only supports SIGKILL.", "CONFLICT");
     const result = await this.transport.request(`${this.path}/signal`, "POST", snapshotSchema, { signal });
     if (result.id !== this.id || result.environmentId !== this.environmentId)
       throw new PuteredError("Command result identity mismatch.", "PROTOCOL_ERROR");

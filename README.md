@@ -60,22 +60,24 @@ top-level `persistence: "workspace"`, or `"entire-environment"` with
 
 New environments use native execution by default. Set a default and optional
 per-program preferences in `putered.config.json`, for example
-`{ "execution": { "default": "native", "programs": { "git": "v8" } } }`.
+`{ "execution": { "default": "native", "programs": { "git": "v8", "tsc": "v8" } } }`.
 The values are `native`, `v8` or `auto`; an explicit top-level `execution`
 option on `environments.create()` overrides the config for that environment.
-This is separate from `settings.execution`, which controls the environment's
-execution security policy. Per-program preferences apply to direct `run()`
-commands; they do not select backends for programs launched inside an `exec()`
-shell script.
+V8 runners support `bash`, `sh`, `git`, `curl`, `sqlite3`, `npm`, `npx`, `node`,
+`esbuild`, `tsc` (including `ts-rust-beta` via `putered.config.json`), and `python3`,
+with automatic right-sized RAM tiers (`128`, `256`, or `384 MiB`) when `memoryMiB`
+is omitted. This is separate from `settings.execution`, which controls the
+environment's execution security policy.
 
-SDK 0.3.0 accepts an optional `name` when creating an environment. Read it through
+SDK 0.3.0+ accepts an optional `name` when creating an environment. Read it through
 `environment.name`; reconnect using the environment ID.
 
 Save compute defaults in `putered.config.json` with
-`{ "resources": { "cpu": 0.5, "memoryMiB": 512 } }`, and override either field
-through the `resources` option on individual executions. CPU shares under load;
-RAM stays capped. Current hosted sizes stop at 1 vCPU / 1024 MiB. This requires
-matching SDK and server builds; see the [SDK guide](docs/sdk.md).
+`{ "resources": { "cpu": 0.5 } }` (omit `memoryMiB` to keep automatic `128–384 MiB`
+V8 RAM tiers, or specify `memoryMiB` from `128` to `8192` in `64 MiB` increments),
+and override either field through the `resources` option on individual executions.
+CPU shares under load; RAM stays capped. Current hosted sizes stop at 1 vCPU /
+1024 MiB. This requires matching SDK and server builds; see the [SDK guide](docs/sdk.md).
 
 ## Guides and examples
 
@@ -88,6 +90,6 @@ matching SDK and server builds; see the [SDK guide](docs/sdk.md).
 - [Response contracts](docs/sdk-response-contracts.md)
 - [Publishing guide](docs/publishing.md)
 
-The package exports `@putered/sdk`, `@putered/sdk/plugins`, and
-`@putered/sdk/packaging`. See the SDK guide for plugin building, stored assets,
+The package exports `@putered/sdk`, `@putered/sdk/plugins`, `@putered/sdk/packaging`,
+and `@putered/sdk/build`. See the SDK guide for plugin building, stored assets,
 command results, and error handling.

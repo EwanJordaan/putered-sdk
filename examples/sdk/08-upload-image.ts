@@ -11,7 +11,8 @@ console.log('Image ID:', image.id, 'Bytes:', image.bytes);
 
 const environment = await client.environments.create({
   template: image.id,
-  settings: { saveScope: 'entire-environment', network: { mode: 'disabled' } },
+  persistence: 'full',
+  settings: { network: { mode: 'disabled' } },
 });
 console.log('Created environment:', environment.id);
 // Keep this configured environment. Use example 11 when finished.

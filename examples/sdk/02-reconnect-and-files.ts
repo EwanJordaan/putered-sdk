@@ -9,4 +9,4 @@ await environment.exec("printf 'Written during a later request\n' >> greeting.tx
 process.stdout.write((await environment.exec('cat greeting.txt')).output);
 
 // describe() is cached configuration, not a live status request.
-console.log('Save scope:', environment.describe().settings.saveScope);
+console.log('Persistence:', environment.persistence);

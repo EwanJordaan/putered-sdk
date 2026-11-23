@@ -89,7 +89,20 @@ export class Transport {
   }
 }
 
-const wireErrorSchema = z.object({ error: z.string(), code: z.string().optional() });
+const wireAllocationSchema = z.object({
+  enforced: z.literal(true),
+  durationMs: z.number().int().nonnegative(),
+  cpuQuotaMicros: z.number().int().positive(),
+  memoryBytes: z.number().int().positive(),
+  cpuMicros: z.number().int().nonnegative().optional(),
+});
+const wireErrorSchema = z.object({
+  error: z.string(),
+  code: z.string().optional(),
+  memoryLimitExceeded: z.boolean().optional(),
+  allocationUsage: wireAllocationSchema.optional(),
+  containmentUncertain: z.boolean().optional(),
+});
 const errorCodeSchema = z.enum(ERROR_CODES);
 
 export function parseWireError(value: unknown, fallbackMessage: string, status?: number, fallbackCode?: ErrorCode): PuteredError {
@@ -97,7 +110,11 @@ export function parseWireError(value: unknown, fallbackMessage: string, status?:
   const parsedCode = parsed.success && parsed.data.code ? errorCodeSchema.safeParse(parsed.data.code) : undefined;
   const code = parsedCode?.success ? parsedCode.data
     : status === undefined ? (fallbackCode ?? "EXECUTION_FAILED") : codeForStatus(status);
-  return new PuteredError(parsed.success ? parsed.data.error : fallbackMessage, code,
-    status === undefined ? {} : { status });
+  return new PuteredError(parsed.success ? parsed.data.error : fallbackMessage, code, {
+    ...(status === undefined ? {} : { status }),
+    ...(parsed.success && parsed.data.memoryLimitExceeded ? { memoryLimitExceeded: true } : {}),
+    ...(parsed.success && parsed.data.allocationUsage ? { allocationUsage: parsed.data.allocationUsage } : {}),
+    ...(parsed.success && parsed.data.containmentUncertain ? { containmentUncertain: true } : {}),
+  });
 }
 

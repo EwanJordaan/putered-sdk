@@ -52,8 +52,7 @@ curl https://putered.com/api/compute/v1/environments \
 | `GET /environments/{id}/terminals` | Website only. | `200 [{ id, state, created_at }]` (up to 20). |
 | `POST /environments/{id}/terminals` | Website: `{ "id": UUID, "columns"?: 20..300, "rows"?: 5..120 }`. Direct server also supports this path with `{ "id": UUID, "environmentId": id, "columns"?: 20..300, "rows"?: 5..120 }`. | `202 TerminalSession`. |
 
-`EnvironmentSettings` accepts `resources?: Resources` for saved CPU/RAM defaults, alongside these fields: `saveScope?: "entire-environment" |
-"workspace-only"`, `git?: boolean`, `execution?: { mode: "auto" | "isolate-only" | "native-only" }`,
+`EnvironmentSettings` accepts `resources?: Resources` for saved CPU/RAM defaults, alongside these fields: `git?: boolean`, `execution?: { mode: "auto" | "isolate-only" | "native-only", allowSudo?: boolean }`,
 `network?: { mode: "disabled" } | { mode: "internet", maxBytesPerExecution?: 1..1073741824, allow?:
 [rule], deny?: [rule], vm?: {allow?,deny?}, v8?: {allow?,deny?} }`. Rules are hostnames,
 `*.hostname`, IPs, CIDRs, or HTTP(S) origins without paths/ports; each list is limited to 128 rules.
@@ -343,10 +342,12 @@ fields.
 `Resources` is `{ cpu?: number, memoryMiB?: number }`.
 `settings.resources` stores optional environment defaults. `exec`, `run` and tool
 call options accept `resources: { cpu?: number, memoryMiB?: number }` as field-wise
-overrides. CPU uses quarter-vCPU increments (minimum 0.25), and RAM uses 256 MiB
-increments (minimum 256). Current availability is capped at 1 vCPU / 1024 MiB;
-larger sizes reject before execution. The account API additionally enforces Plus
-2 vCPU / 2048 MiB and Pro 8 vCPU / 8192 MiB entitlement ceilings.
+overrides. CPU uses quarter-vCPU increments (minimum 0.25), and RAM uses 64 MiB
+increments (minimum 128). Omitting `memoryMiB` lets V8 runners automatically
+right-size to `128`, `256`, or `384 MiB`. Current availability is capped at
+1 vCPU / 1024 MiB; larger sizes reject before execution. The account API
+additionally enforces Plus 2 vCPU / 2048 MiB and Pro 8 vCPU / 8192 MiB
+entitlement ceilings.
 
 `queueTimeoutMs` is 1–300000 (default 120000), independent of `timeoutMs`.
 Admission reserves the entire RAM ceiling; CPU shares fairly under contention,

@@ -1,7 +1,8 @@
 import { client } from './client.js';
 
 const original = await client.environments.create({
-  settings: { saveScope: 'workspace-only', network: { mode: 'disabled' } },
+  persistence: 'workspace',
+  settings: { network: { mode: 'disabled' } },
 });
 console.log('Original environment:', original.id);
 await original.exec("printf 'Saved configuration\n' > config.txt");
@@ -13,7 +14,8 @@ console.log('Snapshot ID:', snapshot.id, 'Bytes:', snapshot.bytes);
 
 const restored = await client.environments.create({
   template: snapshot.id,
-  settings: { saveScope: 'workspace-only', network: { mode: 'disabled' } },
+  persistence: 'workspace',
+  settings: { network: { mode: 'disabled' } },
 });
 console.log('Restored environment:', restored.id);
 process.stdout.write((await restored.exec('cat config.txt')).output);

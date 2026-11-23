@@ -32,6 +32,7 @@ const stateSchema = z.object({
     durationMs: z.number().int().nonnegative(),
     cpuQuotaMicros: z.number().int().positive(),
     memoryBytes: z.number().int().positive(),
+    cpuMicros: z.number().int().nonnegative().optional(),
   }).optional(),
 });
 
