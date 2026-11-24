@@ -5,7 +5,7 @@ import {Transport} from '../dist/client/transport.js';
 
 test('SDK terminal defaults serialize cleanly, inputs stay ordered and output is decoded as bytes',async()=>{
   let id,sequence=0;const writes=[];
-  const transport=new Transport('https://api.example','fixture-key',async(url,init)=>{
+  const transport=new Transport('fixture-key',async(url,init)=>{
     const body=init.body?JSON.parse(init.body):undefined;
     if(url.endsWith('/environments/env_fixture/terminals')){assert.deepEqual(Object.keys(body),['id']);id=body.id;}
     if(url.endsWith('/input')){assert.equal(body.sequence,sequence++);writes.push(body);return Response.json({nextSequence:sequence});}
@@ -18,6 +18,6 @@ test('SDK terminal defaults serialize cleanly, inputs stay ordered and output is
   assert.equal((await session.stop()).state,'closed');
 });
 test('SDK terminal rejects substituted session identities before exposing output',async()=>{
-  const id=crypto.randomUUID(),transport=new Transport('https://api.example','fixture-key',async()=>Response.json({id:crypto.randomUUID(),environmentId:'env_other',state:'running',nextSequence:0,createdAt:1,expiresAt:300001}));
+  const id=crypto.randomUUID(),transport=new Transport('fixture-key',async()=>Response.json({id:crypto.randomUUID(),environmentId:'env_other',state:'running',nextSequence:0,createdAt:1,expiresAt:300001}));
   await assert.rejects(new EnvironmentTerminals(transport,'env_fixture').start({id}),error=>error.code==='PROTOCOL_ERROR');
 });

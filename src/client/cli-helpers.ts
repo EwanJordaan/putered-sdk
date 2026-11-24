@@ -2,7 +2,6 @@ import { Putered, PuteredError } from "./sdk.js";
 
 export function clientFromEnv(): Putered {
   return new Putered({
-    baseUrl: process.env.PUTERED_BASE_URL,
     apiKey: process.env.PUTERED_API_KEY ?? "",
   });
 }

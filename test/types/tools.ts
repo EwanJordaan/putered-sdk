@@ -20,7 +20,9 @@ const status: number = failure.status;
 void code; void status;
 // @ts-expect-error SDK error codes are a closed union.
 const invalidCode: ErrorCode = "SOMETHING_RANDOM";
-const client = new Putered({ baseUrl: "http://localhost:3000", apiKey: "x".repeat(32) });
+// @ts-expect-error Custom baseUrl is not supported.
+new Putered({ baseUrl: "http://localhost:3000", apiKey: "x".repeat(32) });
+const client = new Putered({ apiKey: "x".repeat(32) });
 const ref = await client.tools.use(plugin);
 const environment = await client.environments.create({ name: "word-counter", tools: [ref] });
 const outboundPolicy: OutboundPolicy = { allow: { "api.vercel.com": [

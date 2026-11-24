@@ -36,7 +36,7 @@ test('bounded JSON preserves valid data and rejects cycles, depth, sparse arrays
 test('SDK rejects oversized input before network I/O and reports malformed/failed responses by code', async () => {
   let requests = 0;
   const environment = { id: 'env_test', tools: [], settings: {} };
-  const client = new Putered({ baseUrl: 'http://localhost:3000', apiKey: 'x'.repeat(32), fetch: async () => {
+  const client = new Putered({ apiKey: 'x'.repeat(32), fetch: async () => {
     requests++; return new Response(JSON.stringify(environment));
   } });
   const env = await client.environments.create();
@@ -45,7 +45,7 @@ test('SDK rejects oversized input before network I/O and reports malformed/faile
   const record = { id: 'tool_' + 'a'.repeat(64), visibility: 'private', manifest: {
     name: 'test', version: '1', execution: { backend: 'v8' }, tools: { echo: { inputSchema: {}, outputSchema: {} } },
   } };
-  const toolClient = new Putered({ baseUrl: 'http://localhost:3000', apiKey: 'x'.repeat(32), fetch: async url => {
+  const toolClient = new Putered({ apiKey: 'x'.repeat(32), fetch: async url => {
     requests++; return new Response(JSON.stringify(String(url).includes('/tools/') ? record : { ...environment, tools: [record.id] }));
   } });
   const tool = await toolClient.tools.use(record.id);
@@ -55,18 +55,18 @@ test('SDK rejects oversized input before network I/O and reports malformed/faile
   const cyclic = {}; cyclic.self = cyclic;
   await assert.rejects(toolEnv.tools.call(tool, 'echo', cyclic), error => error.code === 'INVALID_INPUT');
   assert.equal(requests, before);
-  const broken = new Putered({ baseUrl: 'http://localhost:3000', apiKey: 'x'.repeat(32), fetch: async () => new Response('not-json') });
+  const broken = new Putered({ apiKey: 'x'.repeat(32), fetch: async () => new Response('not-json') });
   await assert.rejects(broken.environments.create(), error => error.code === 'PROTOCOL_ERROR');
-  const unavailable = new Putered({ baseUrl: 'http://localhost:3000', apiKey: 'x'.repeat(32), fetch: async () => { throw new Error('offline'); } });
+  const unavailable = new Putered({ apiKey: 'x'.repeat(32), fetch: async () => { throw new Error('offline'); } });
   await assert.rejects(unavailable.environments.create(), error => error.code === 'NETWORK_ERROR');
-  const denied = new Putered({ baseUrl: 'http://localhost:3000', apiKey: 'x'.repeat(32), fetch: async () => new Response(JSON.stringify({ error: 'Denied', code: 'POLICY_DENIED' }), { status: 403 }) });
+  const denied = new Putered({ apiKey: 'x'.repeat(32), fetch: async () => new Response(JSON.stringify({ error: 'Denied', code: 'POLICY_DENIED' }), { status: 403 }) });
   await assert.rejects(denied.environments.create(), error => error instanceof PuteredError && error.code === 'POLICY_DENIED' && error.status === 403);
 });
 
 test('SDK accepts valid control-byte exec responses within actual stdout limits', async () => {
   const stdout = '\0'.repeat(2 * 1024 * 1024);
   const result = { stdout, stdoutBase64: Buffer.from(stdout).toString('base64'), stderr: '', exitCode: 0, durationMs: 1, hostDurationMs: 2 };
-  const client = new Putered({ baseUrl: 'http://localhost:3000', apiKey: 'x'.repeat(32), fetch: async url =>
+  const client = new Putered({ apiKey: 'x'.repeat(32), fetch: async url =>
     new Response(JSON.stringify(String(url).endsWith('/exec') ? result : { id: 'env_test', tools: [], settings: {} })) });
   const env = await client.environments.create();
   assert.equal((await env.exec('echo test')).stdout.length, stdout.length);
@@ -118,7 +118,7 @@ test('tool outputs serialize the validated clone and service output errors use I
     name: 'test', version: '1', execution: { backend: 'v8' }, tools: { echo: { inputSchema: {}, outputSchema: {} } },
   } };
   for (const response of ['{"output":{"constructor":"unsafe"}}', '{"output":1e400}']) {
-    const client = new Putered({ baseUrl: 'http://localhost:3000', apiKey: 'x'.repeat(32), fetch: async url => {
+    const client = new Putered({ apiKey: 'x'.repeat(32), fetch: async url => {
       if (String(url).endsWith('/tools/call')) return new Response(response);
       return new Response(JSON.stringify(String(url).includes('/tools/') ? record : { id: 'env_test', tools: [record.id], settings: {} }));
     } });
@@ -177,7 +177,7 @@ export default definePlugin({name:'portable', tools:{classify:defineTool({
   await symlink(join(root, 'node_modules', 'zod'), join(consumer, 'node_modules', 'zod'), 'junction');
   await symlink(join(root, 'node_modules', '@types'), join(consumer, 'node_modules', '@types'), 'junction');
   await writeFile(join(consumer, 'consumer.mts'), `import plugin from './bundle.mjs'; import {Putered} from '@putered/sdk';
-const client=new Putered({baseUrl:'http://localhost:3000',apiKey:'x'.repeat(32)});
+const client=new Putered({apiKey:'x'.repeat(32)});
 const ref=await client.tools.use(plugin); const env=await client.environments.create({tools:[ref]});
 const output=await env.tools.call(ref,'classify',{text:'hi'});
 const label:'research'|'notes'=output.output;

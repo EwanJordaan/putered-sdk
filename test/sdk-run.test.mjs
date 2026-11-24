@@ -8,7 +8,7 @@ const result = { stdout: 'ok\n', stdoutBase64: 'b2sK', stderr: '', exitCode: 0, 
 const completed = { id: jobId, environmentId: id, state: 'completed', httpStatus: 200, result };
 
 function client(fetch) {
-  return new Putered({ baseUrl: 'https://putered.invalid', apiKey: 'x'.repeat(32), config: {}, fetch });
+  return new Putered({ apiKey: 'x'.repeat(32), config: {}, fetch });
 }
 
 test('run forwards literal argv unchanged and keeps command output semantics', async () => {
@@ -21,7 +21,7 @@ test('run forwards literal argv unchanged and keeps command output semantics', a
   const env = await sdk.environments.connect(id);
   const command = await env.run('git', argv);
   const post = requests.find(request => request.options.method === 'POST');
-  assert.equal(post.url, `https://putered.invalid/v1/environments/${id}/run`);
+  assert.equal(post.url, `https://putered.com/api/compute/v1/environments/${id}/run`);
   assert.deepEqual(JSON.parse(post.options.body), { program: 'git', args: argv });
   assert.equal(command.output, 'ok\n');
   assert.deepEqual(command, result);
@@ -57,7 +57,7 @@ test('run async submits once to the run endpoint and polls the same saved result
   assert.deepEqual(output, result);
   const posts = requests.filter(request => request.options.method === 'POST');
   assert.equal(posts.length, 1);
-  assert.equal(posts[0].url, `https://putered.invalid/v1/environments/${id}/run?async=1`);
+  assert.equal(posts[0].url, `https://putered.com/api/compute/v1/environments/${id}/run?async=1`);
   assert.deepEqual(JSON.parse(posts[0].options.body), {
     program: 'bash', args: ['-c', 'git clone https://example.invalid/repo'], timeoutMs: 300000,
   });

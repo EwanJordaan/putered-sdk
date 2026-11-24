@@ -4,9 +4,9 @@ Start with the [runnable examples](../examples/sdk/README.md). The
 [HTTP API contract](api-contract.md) defines request bodies, response fields,
 authentication, and errors for clients that call the server directly.
 
-The SDK connects to hosted compute by default. Set `PUTERED_API_KEY` in your
+The SDK connects to hosted Putered compute. Set `PUTERED_API_KEY` in your
 application environment and pass it to `new Putered({ apiKey })`. Get the key
-from the Putered console; no server installation or base URL is required.
+from the Putered console.
 
 For normal work, create or reconnect to one environment and send a shell string:
 

@@ -11,7 +11,7 @@ test('SDK config rejects malformed, oversized, missing and unknown settings befo
   t.after(() => rm(directory, { recursive: true, force: true }));
   const path = join(directory, 'config.json');
   let requests = 0;
-  const options = { baseUrl: 'http://localhost:3000', apiKey: 'x'.repeat(32), config: path,
+  const options = { apiKey: 'x'.repeat(32), config: path,
     fetch: async () => { requests++; return new Response('{}'); } };
 
   assert.throws(() => new Putered(options), error => error.code === 'INVALID_INPUT');

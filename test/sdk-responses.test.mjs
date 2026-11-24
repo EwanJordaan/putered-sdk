@@ -19,7 +19,7 @@ const tool = { id: toolId, visibility: 'private', manifest: { name: 'echo', vers
 } } };
 const execution = { stdout: 'ok', stdoutBase64: 'b2s=', stderr: '', exitCode: 0, durationMs: 1.5, hostDurationMs: 2.5 };
 const protocol = error => error.code === 'PROTOCOL_ERROR';
-const client = fetcher => new Putered({ baseUrl: 'https://putered.invalid', apiKey: 'x'.repeat(32), config: {}, fetch: fetcher });
+const client = fetcher => new Putered({ apiKey: 'x'.repeat(32), config: {}, fetch: fetcher });
 const reply = value => Response.json(value);
 
 test('environment deletion requires an exact identity and explicit acknowledgement in one DELETE response', async () => {

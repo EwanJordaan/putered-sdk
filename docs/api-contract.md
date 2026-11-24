@@ -1,8 +1,8 @@
 # Public API contract (current implementation)
 
 This documents the HTTP JSON contract implemented today. It covers the account-backed API at
-`https://putered.com/api/compute/v1` (the SDK base URL is `https://putered.com/api/compute`, because
-it appends `/v1`; the public key gateway also exposes `https://api.putered.com/v1`) and the internal execution
+`https://putered.com/api/compute/v1` (the SDK always connects to this endpoint; the public key
+gateway also exposes `https://api.putered.com/v1`) and the internal execution
 server API at `<server>/v1` for hosted-service operators. Customers use hosted
 compute; internal server routes are not an alternative customer deployment. It is not a promise that the two surfaces have identical routes or
 behavior. JSON objects shown below omit optional fields unless noted. Requests use `Content-Type:
@@ -13,7 +13,7 @@ application/json` except binary upload parts and OCI archives.
 | Caller | Base URL | Credential | Boundary |
 | --- | --- | --- | --- |
 | Website/API account key | `https://putered.com/api/compute/v1` or `https://api.putered.com/v1` | `Authorization: Bearer pk_live_<64 lowercase hex>` | Personal account ownership, email verification, per-account quota, and key execute permission. The website Worker and public gateway translate the path to account compute. |
-| Direct server / scoped SDK | `<server>/v1` | `Authorization: Bearer <token>` | Operator token has access to all local records. Configured project keys are restricted to their project and scopes. |
+| Internal execution server | `<server>/v1` | `Authorization: Bearer <token>` | Operator token has access to all local records. Configured project keys are restricted to their project and scopes. |
 | Browser dashboard | `https://putered.com/api/...` | Same-origin authenticated session cookie | Browser/session routes. Session-authenticated mutations require the configured same-origin `Origin`; cross-site fetches are rejected. Do not use these as SDK bearer-key routes. |
 
 The website key is checked by the account service, then proxied to the backend with a server-held
@@ -279,7 +279,7 @@ same-origin `Origin` and reject cross-site fetches. They are not general bearer-
 | Route | Methods and response |
 | --- | --- |
 | `/api/dashboard` | `GET { environments, totals, recent, activity, computeQuota, refreshedAt, storageBytes, billing }` |
-| `/api/keys` | `GET [key metadata]`; `POST {name, canExecute?}` → `201 {id,key,name,baseUrl,revealOnce:true}` (secret is returned once); `/api/keys/{id}` `DELETE` → `{revoked:true}` |
+| `/api/keys` | `GET [key metadata]`; `POST {name, canExecute?}` → `201 {id,key,name,revealOnce:true}` (secret is returned once); `/api/keys/{id}` `DELETE` → `{revoked:true}` |
 | `/api/usage` | `GET { executions, durationMs, computeQuota, recent }` |
 | `/api/billing`, `/api/billing/checkout`, `/api/billing/portal` | Account billing actions and summaries; response varies by action. |
 | `/api/ssh-keys...`, `/api/ssh/control` | Website SSH key and control-plane routes. |

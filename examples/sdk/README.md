@@ -13,7 +13,7 @@ npm install
 
 Create an API key with execution permission in the Putered console. Hosted
 compute needs an active subscription and available credits. The SDK connects to
-hosted compute by default, so only the API key is needed.
+hosted Putered compute using only your API key.
 
 Set credentials in your shell. Do not put the key in source code or browser code.
 
@@ -30,8 +30,6 @@ Bash:
 export PUTERED_API_KEY='<your-api-key>'
 npm run example -- 01-create-and-run.ts
 ```
-
-No server setup or base URL is required.
 
 If you already built this repository, you can run from its root without installing
 the example package separately:

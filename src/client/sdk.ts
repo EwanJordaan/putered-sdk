@@ -107,15 +107,14 @@ export class Putered {
     create(options?: EnvironmentOptions): Promise<Environment>;
     connect(id: string, options?: { signal?: AbortSignal }): Promise<Environment>;
   };
-  constructor(options: { baseUrl?: string; apiKey: string; fetch?: typeof fetch; config?: SdkConfig | string }) {
-    let url: URL;
-    try { url = new URL(options.baseUrl === undefined ? "https://putered.com/api/compute" : options.baseUrl); }
-    catch (error) { throw new PuteredError("Invalid Putered base URL.", "INVALID_INPUT", { cause: error }); }
-    if (!["http:", "https:"].includes(url.protocol) || url.username || url.password || url.search || url.hash)
-      throw new PuteredError("Invalid Putered base URL.", "INVALID_INPUT");
+  constructor(options: { apiKey: string; fetch?: typeof fetch; config?: SdkConfig | string }) {
+    if (!options || typeof options !== "object" || Array.isArray(options))
+      throw new PuteredError("Invalid Putered client options.", "INVALID_INPUT");
+    if ((options as { baseUrl?: unknown }).baseUrl !== undefined)
+      throw new PuteredError("Custom Putered base URL is not supported.", "INVALID_INPUT");
     if (typeof options.apiKey !== "string" || options.apiKey.length < 32)
       throw new PuteredError("Putered API key must be at least 32 characters.", "INVALID_INPUT");
-    const transport = new Transport(url.href.replace(/\/$/, ""), options.apiKey, options.fetch ?? fetch);
+    const transport = new Transport(options.apiKey, options.fetch ?? fetch);
     const config = loadSdkConfig(options.config);
     const checkNetwork = (network: EnvironmentRecord["settings"]["network"]) => {
       if (config.network?.mode === "disabled" && network?.mode === "internet")

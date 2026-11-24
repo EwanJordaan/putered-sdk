@@ -8,7 +8,7 @@ const path = `/environments/${id}/commands/${jobId}`;
 const result = { stdout: 'ok', stdoutBase64: 'b2s=', stderr: '', exitCode: 0, durationMs: 1, hostDurationMs: 2 };
 const snapshot = (cursor, output, extra = {}) => ({ id: jobId, environmentId: id,
   state: 'completed', createdAt: 1, cursor, output, result, httpStatus: 200, ...extra });
-const client = fetch => new Putered({ baseUrl: 'http://localhost', apiKey: 'x'.repeat(32), config: {}, fetch });
+const client = fetch => new Putered({ apiKey: 'x'.repeat(32), config: {}, fetch });
 const record = { id, tools: [], settings: {} };
 
 test('writable sinks and logsBytes preserve non-UTF8 bytes on both streams', async () => {
@@ -37,7 +37,7 @@ test('writable sinks and logsBytes preserve non-UTF8 bytes on both streams', asy
 test('truncated history fails explicitly, then resumes retained logs and exposes a reconnect cursor', async () => {
   const cursors = [];
   const sdk = client(async url => {
-    if (!url.includes('/commands/')) return Response.json(record);
+    if (!url.includes('/execution-jobs/')) return Response.json(record);
     const cursor = Number(new URL(url).searchParams.get('cursor'));
     cursors.push(cursor);
     return Response.json(cursor < 8
@@ -64,7 +64,7 @@ test('truncated history fails explicitly, then resumes retained logs and exposes
 test('a live iterator can recover after encountering a reset', async () => {
   let polls = 0;
   const sdk = client(async url => {
-    if (!url.includes('/commands/')) return Response.json(record);
+    if (!url.includes('/execution-jobs/')) return Response.json(record);
     return Response.json(++polls === 1 ? snapshot(0, [], { state: 'running' })
       : snapshot(10, [{ stream: 'stdout', data: 'b2s=' }], { reset: true }));
   });
@@ -84,7 +84,7 @@ test('caller IDs survive a lost submission response for exec, async run and deta
         submissions.push({ url, body: JSON.parse(options.body) });
         throw new Error('response lost after server accepted command');
       }
-      return Response.json(url.includes('/commands/') ? snapshot(0, []) : record);
+      return Response.json(url.includes('/execution-jobs/') ? snapshot(0, []) : record);
     });
     const env = await sdk.environments.connect(id);
     await assert.rejects(kind === 'exec' ? env.exec('side-effect', { requestId: jobId })
@@ -130,7 +130,7 @@ test('caller IDs work on successful submissions and reject substituted tickets',
 
 test('text logs decode UTF-8 across frames and keep streams separate', async () => {
   const emoji = Buffer.from('🙂');
-  const sdk = client(async url => Response.json(url.includes('/commands/') ? snapshot(6, [
+  const sdk = client(async url => Response.json(url.includes('/execution-jobs/') ? snapshot(6, [
     { stream: 'stdout', data: emoji.subarray(0, 2).toString('base64') },
     { stream: 'stderr', data: 'b2s=' },
     { stream: 'stdout', data: emoji.subarray(2).toString('base64') },
@@ -144,7 +144,7 @@ test('text logs decode UTF-8 across frames and keep streams separate', async () 
 
 test('stopping a byte iterator preserves the cursor before unconsumed frames', async () => {
   const sdk = client(async url => {
-    if (!url.includes('/commands/')) return Response.json(record);
+    if (!url.includes('/execution-jobs/')) return Response.json(record);
     const cursor = Number(new URL(url).searchParams.get('cursor'));
     return Response.json(snapshot(2, cursor === 0
       ? [{ stream: 'stdout', data: 'YQ==' }, { stream: 'stdout', data: 'Yg==' }]

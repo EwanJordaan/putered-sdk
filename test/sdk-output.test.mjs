@@ -9,7 +9,7 @@ const data = { stdout:'hello\n',stdoutBase64:'aGVsbG8K',stderr:'warning\n',exitC
 test('output reads collected sync/async results and preserves the existing serializable contract',async()=>{
   for(const asynchronous of [false,true]){
     let calls=0;
-    const sdk=new Putered({baseUrl:'https://putered.invalid',apiKey:'x'.repeat(32),config:{},fetch:async(url,options)=>{
+    const sdk=new Putered({apiKey:'x'.repeat(32),config:{},fetch:async(url,options)=>{
       calls++;
       if(url.endsWith('/execution-jobs/'+jobId))return Response.json({id:jobId,environmentId:environment.id,state:'completed',httpStatus:200,result:data});
       return Response.json(options.method==='POST'?(asynchronous?{jobId,state:'running'}:data):environment);
@@ -29,7 +29,7 @@ test('output reads collected sync/async results and preserves the existing seria
 test('nonzero commands reject exec with output and permit explicit unchecked results',async()=>{
   for(const asynchronous of [false,true]){
     const failed={...data,exitCode:2,stdout:'',stdoutBase64:'',stderr:'build failed\n'};
-    const sdk=new Putered({baseUrl:'https://putered.invalid',apiKey:'x'.repeat(32),config:{},fetch:async(url,options)=>{
+    const sdk=new Putered({apiKey:'x'.repeat(32),config:{},fetch:async(url,options)=>{
       if(url.endsWith('/execution-jobs/'+jobId))return Response.json({id:jobId,environmentId:environment.id,state:'completed',httpStatus:200,result:failed});
       return Response.json(options.method==='POST'?(asynchronous?{jobId,state:'running'}:failed):environment);
     }});
@@ -48,7 +48,7 @@ test('nonzero commands reject exec with output and permit explicit unchecked res
 
 test('memory limit failures expose a clear CommandError and top-level usage flag', async () => {
   const failed = { ...data, exitCode: 137, memoryLimitExceeded: true };
-  const sdk = new Putered({ baseUrl: 'https://putered.invalid', apiKey: 'x'.repeat(32), config: {}, fetch: async (_url, options) =>
+  const sdk = new Putered({ apiKey: 'x'.repeat(32), config: {}, fetch: async (_url, options) =>
     Response.json(options.method === 'POST' ? failed : environment) });
   const env = await sdk.environments.connect(environment.id);
   await assert.rejects(env.exec('large', { check: true }), error =>

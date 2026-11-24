@@ -9,7 +9,7 @@ test('SDK identifies its installed version on JSON, upload and download requests
   const { Transport } = await import('../dist/client/transport.js');
   const { z } = await import('zod');
   const seen = [];
-  const transport = new Transport('https://putered.com/api/compute', 'x'.repeat(32), async (_url, options) => {
+  const transport = new Transport('x'.repeat(32), async (_url, options) => {
     seen.push(options.headers);
     return Response.json({});
   });

@@ -4,14 +4,13 @@ import { MAX_BYTES, encodeJson } from "../json.js";
 import { ERROR_CODES, PuteredError, codeForStatus, type ErrorCode } from "../errors.js";
 const { version: sdkVersion } = createRequire(import.meta.url)("../../package.json") as { version: string };
 
+const HOSTED_COMPUTE_BASE_URL = "https://putered.com/api/compute";
+
 export class Transport {
   private readonly commandPaths = new Map<string, string>();
-  private readonly hostedCompute: boolean;
   get accountApi() { return this.apiKey.startsWith('pk_live_'); }
-  constructor(private readonly baseUrl: string, private readonly apiKey: string,
-    private readonly fetcher: typeof fetch) {
-    this.hostedCompute = new URL(baseUrl).pathname.replace(/\/$/, "").endsWith("/api/compute");
-  }
+  constructor(private readonly apiKey: string,
+    private readonly fetcher: typeof fetch) {}
   rememberCommandPath(environmentId: string, commandId: string, path: string): void {
     const key = `${environmentId}:${commandId}`;
     this.commandPaths.delete(key);
@@ -21,7 +20,7 @@ export class Transport {
   commandPath(environmentId: string, commandId: string): string {
     const known = this.commandPaths.get(`${environmentId}:${commandId}`);
     if (known) return known;
-    return this.hostedCompute ? `/execution-jobs/${commandId}` : `/environments/${environmentId}/commands/${commandId}`;
+    return `/execution-jobs/${commandId}`;
   }
   async request<S extends z.ZodType>(path: string, method: string, schema: S,
     input?: unknown, signal?: AbortSignal, bytes?: Uint8Array): Promise<z.output<S>> {
@@ -46,7 +45,7 @@ export class Transport {
   }
   private async send(path: string, init: RequestInit): Promise<Response> {
     let response: Response;
-    try { response = await this.fetcher(`${this.baseUrl}/v1${path}`, {
+    try { response = await this.fetcher(`${HOSTED_COMPUTE_BASE_URL}/v1${path}`, {
       ...init, redirect: "manual",
       headers: { ...init.headers, "X-Putered-SDK-Version": sdkVersion, Authorization: `Bearer ${this.apiKey}` },
     }); } catch (error) {

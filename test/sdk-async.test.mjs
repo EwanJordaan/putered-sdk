@@ -7,7 +7,7 @@ const result = { stdout: 'hello', stdoutBase64: 'aGVsbG8=', stderr: 'warning\n',
 const completed = { id: jobId, environmentId: id, state: 'completed', httpStatus: 200, result };
 async function fixture(reply) {
   const requests = [];
-  const client = new Putered({ baseUrl: 'https://putered.invalid', apiKey: 'x'.repeat(32), config: {}, fetch: async (url, options) => {
+  const client = new Putered({ apiKey: 'x'.repeat(32), config: {}, fetch: async (url, options) => {
     requests.push({ url, options });
     if (url.endsWith('/environments/' + id)) return Response.json({ id, tools: [], settings: {} });
     if (url.endsWith('/signal')) return Response.json({ id: jobId, environmentId: id, state: 'running', createdAt: 1, cursor: 0, output: [] });
@@ -56,7 +56,7 @@ test('async cancellation signals the submitted command and never replays executi
 });
 
 test('direct servers returning an ordinary result remain compatible with opt-in async execution', async () => {
-  const client = new Putered({ baseUrl: 'https://putered.invalid', apiKey: 'x'.repeat(32), config: {}, fetch: async (url, options) =>
+  const client = new Putered({ apiKey: 'x'.repeat(32), config: {}, fetch: async (url, options) =>
     Response.json(options.method === 'POST' ? result : { id, tools: [], settings: {} }) });
   const env = await client.environments.connect(id);
   assert.deepEqual(await env.exec('echo hello', { async: true }), result);

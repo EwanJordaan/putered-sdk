@@ -28,8 +28,8 @@ Install the generated tarball in your application with `npm install
 ## Connect to Putered
 
 Set `PUTERED_API_KEY` in the application’s private environment, then create an
-environment. The SDK uses hosted compute by default and adds `/v1` to its base
-URL. Hosted compute requires an active subscription and available credits:
+environment. The SDK connects to hosted Putered compute. Hosted compute requires
+an active subscription and available credits:
 
 ```ts
 import { Putered } from '@putered/sdk';

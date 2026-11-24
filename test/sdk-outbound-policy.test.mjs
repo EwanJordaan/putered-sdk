@@ -17,7 +17,7 @@ const envVars = { VERCEL_TOKEN: 'dummy-vercel-token', VERCEL_TEAM_ID: 'team_demo
 const redactedPolicy = structuredClone(policy);
 redactedPolicy.allow['api.vercel.com'][0].transform[0].headers.Authorization = '<redacted>';
 const record = extra => ({ id, tools: [], settings: {}, ...extra });
-const client = fetch => new Putered({ baseUrl: 'https://putered.invalid', apiKey, fetch });
+const client = fetch => new Putered({ apiKey, fetch });
 
 function reply(value) { return Response.json(value); }
 
