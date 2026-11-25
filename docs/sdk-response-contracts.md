@@ -1,85 +1,56 @@
 # SDK response contracts
 
-This audit covers all 18 public client operations and every HTTP response consumed
-by `src/client/`. Request and stored-record schemas remain strict. Client response
-schemas live in `src/client/responses.ts`: harmless extra envelope metadata is
-discarded, while required values, policy, manifests and identity are checked.
-Returned execution types derive from their runtime schema, including optional
-Git/Python/network metrics, to keep TypeScript and runtime validation aligned.
-
-Opt-in `environment.exec(command, { async: true })` additionally validates the
-submission ticket, matching execution/environment IDs and job state, HTTP status,
-and the complete saved execution result. Collection failures retain the execution
-ID and never replay the POST. Output streams remain separate, and empty stdout
-or a nonzero process exit are valid results.
+Every HTTP response consumed by `src/client/` is validated at runtime against schemas in `src/client/responses.ts`. Harmless extra envelope fields are stripped, while identity, policy, manifests, and required payload fields are strictly checked. Execution return types are inferred directly from those runtime schemas so TypeScript types and runtime checks stay in lockstep.
 
 ## Operation coverage
 
-| SDK operation | Producer / return | Checks |
+This audit covers all 18 public client operations:
+
+| SDK operation | Endpoint | Runtime checks |
 | --- | --- | --- |
-| `tools.list()` | `GET /v1/tools` → tool references | Array, record/manifest shape, bounded JSON; returned references are frozen. |
-| `tools.use()` | `GET /v1/tools/{id}`, or `POST /v1/tools/use` → reference | Record shape, requested ID, packaged definition's manifest when supplied. A missing package may be published once after GET 404. |
-| `environments.create()` | `POST /v1/environments` → environment | Required record fields, requested name (when supplied), tool set and explicit settings, network restrictions/transfer cap; preserves optional name and discards unknown metadata. |
-| `environments.connect()` | `GET /v1/environments/{id}` → environment | Shape, matching ID and SDK network policy. |
-| `environment.describe()` | Validated cached record → frozen copy | No network read; uses the record validated by create/connect. |
-| `environment.exec()` | `POST /v1/environments/{id}/exec` → execution result | Required outputs/status/timings; canonical base64, decoded text agreement and byte bound; nonnegative timings/counters and optional metrics. Nonzero process exits are valid results. |
-| `environment.delete()` | `DELETE /v1/environments/{id}` → `{id,deleted:true}` | Exact requested environment identity and confirmed deletion acknowledgement. |
-| `environment.tools.call()` | `POST /v1/environments/{id}/tools/call` → `{output}` | Required output, bounded JSON and the tool's declared output schema; not merely its envelope. |
-| `environment.capturePreset()` | `POST /v1/environments/{id}/preset` → preset | Preset identity, name, source, originating environment and capture scope. |
-| `assets.get()` | `GET /v1/assets/{id}` → asset reference | Reference shape, requested ID; returned reference/entrypoints are frozen. |
-| `assets.list()` | `GET /v1/assets` → summaries | Array, IDs/platform/entrypoints, state, byte counts. |
-| `assets.status()` | `GET /v1/assets/{id}/upload` → upload | Requested ID, manifest digest identity, exact offset hash set, bounds/alignment, ready/validating state completeness. |
-| `assets.cancel()` | `DELETE /v1/assets/{id}/upload` → void | Requires `{cancelled:true}` before returning. |
-| `assets.upload()` | Begin/part/complete → asset reference | Manifest/request agreement, digest identity, offsets that never regress, per-part progress, terminal failure, published ID/platform/entrypoints. Never resends a part after a nonadvancing acknowledgement. |
-| `presets.list()` | `GET /v1/presets` → presets | Array and preset shape, identity derived from name/archive hash, validated default environment settings. |
-| `presets.get()` | `GET /v1/presets/{id}` → preset | Same validation plus requested ID. |
-| `presets.upload()` | `POST /v1/presets?name=...` → preset | Shape, derived identity, requested name, source, uploaded byte count and archive SHA-256. |
-| `presets.download()` | Metadata plus binary archive → preset | Metadata identity, archive content type, streamed byte count/SHA-256. Publishes a private staging file only after verification and never overwrites an existing destination. |
+| `tools.list()` | `GET /v1/tools` | Array of valid tool records and manifests within JSON bounds; returned references are deeply frozen. |
+| `tools.use()` | `GET /v1/tools/{id}`, `POST /v1/tools/use` | Record shape, exact ID match, and manifest match when a local definition is supplied. Publishes once on `404`. |
+| `environments.create()` | `POST /v1/environments` | Required record fields, requested `name` (when provided), tool list, explicit settings, and network/transfer constraints. |
+| `environments.connect()` | `GET /v1/environments/{id}` | Record shape, matching ID, and compliance with the client's configured network policy. |
+| `environment.describe()` | *(cached)* | Returns a frozen copy of the validated create/connect record without a network call. |
+| `environment.exec()` | `POST /v1/environments/{id}/exec` | Output streams, exit code, canonical base64 agreement with UTF-8 `stdout`, byte bounds, nonnegative timings, and optional metrics. Nonzero exits are valid responses. |
+| `environment.delete()` | `DELETE /v1/environments/{id}` | Matching environment ID and `{ deleted: true }` acknowledgement. |
+| `environment.tools.call()` | `POST /v1/environments/{id}/tools/call` | Present output within JSON bounds, validated against the tool's declared output schema. |
+| `environment.capturePreset()` | `POST /v1/environments/{id}/preset` | Preset identity, name, source, originating environment ID, and capture scope. |
+| `assets.get()` | `GET /v1/assets/{id}` | Reference shape and requested ID; returned reference and entrypoints are frozen. |
+| `assets.list()` | `GET /v1/assets` | Array of summaries with IDs, platform, entrypoints, state, and byte counts. |
+| `assets.status()` | `GET /v1/assets/{id}/upload` | Requested ID, manifest digest identity, exact offset hash set, alignment/bounds, and state completeness. |
+| `assets.cancel()` | `DELETE /v1/assets/{id}/upload` | Requires `{ cancelled: true }` before resolving. |
+| `assets.upload()` | Begin / part / complete | Manifest agreement, digest identity, non-regressing offsets, progress bounds, terminal errors, and published reference. Never resends a part after a non-advancing acknowledgement. |
+| `presets.list()` | `GET /v1/presets` | Array of presets with derived IDs and validated default environment settings. |
+| `presets.get()` | `GET /v1/presets/{id}` | Same validation plus exact requested ID match. |
+| `presets.upload()` | `POST /v1/presets?name=...` | Shape, derived identity, requested name, source, uploaded bytes, and archive SHA-256. |
+| `presets.download()` | Metadata + binary archive | Metadata identity, OCI content type, streamed byte count and SHA-256. Stages privately and verifies before publishing; never overwrites an existing file. |
 
-The server and SDK now share the preset-ID derivation function. No wire identity
-algorithm or server execution behavior changed.
+When `environment.exec(command, { async: true })` is used, the SDK also validates the submission ticket, matching execution/environment IDs, job state, HTTP status, and final saved result. Collection errors retain the execution ID and never replay the `POST`.
 
-## Transport and error responses
+The server and SDK share the same preset-ID derivation logic.
 
-All JSON responses are size-bounded and decoded as strict UTF-8 before parsing.
-Malformed successes fail with `PROTOCOL_ERROR`; missing or mistyped fields do not
-become partial SDK values. Empty/HTML error responses preserve their actual HTTP
-status and classification, including Cloudflare 524 as `TIMEOUT`. Unknown future
-error-code strings retain a valid server message and fall back to HTTP-based
-classification. Redirects are rejected without following credentials or replaying
-mutations. Response failures do not trigger automatic command retries.
+## Transport & error guarantees
 
-The response budget remains 32 MiB, separate from the four-MiB execution-byte
-limit; JSON escaping and base64 account for the larger envelope allowance. Large
-responses are rejected explicitly rather than accepted without bounds. Downloaded
-preset archives use their separate one-GiB limit and streamed verification.
-
-SDK capability and authentication restrictions still apply. The hosted account
-API supports a subset of the private registry API; it can reject unsupported
-tool/asset/preset operations. Validating those errors does not grant those routes.
-The existing SDK `exec()` remains synchronous; this audit does not add the chat
-adapter's asynchronous execution API to the SDK.
+- **Strict decoding & bounds:** JSON responses are capped at **32 MiB** (separate from the 4 MiB execution-byte limit, accounting for JSON escaping and base64) and decoded as strict UTF-8 before parsing. Downloaded preset archives use a separate **1 GiB** limit with streaming SHA-256 verification.
+- **No partial values:** Malformed `2xx` responses fail with `PROTOCOL_ERROR` rather than returning partial objects.
+- **Preserved error semantics:** Empty or HTML error responses retain their HTTP status and classification (including Cloudflare `524` → `TIMEOUT`). Unrecognized future error codes preserve the server message and fall back to HTTP status classification.
+- **No unsafe redirects or retries:** Redirects are rejected so credentials are never forwarded and mutations are never replayed. Transport or response errors never trigger automatic command retries.
+- **Surface boundaries:** The hosted account API exposes a subset of the direct server's registry endpoints and may reject unsupported tool/asset/preset calls. Response validation does not grant access to unavailable routes.
 
 ## Verification
 
+Run the focused response-contract tests:
+
 ```sh
-node node_modules/typescript/bin/tsc
-node scripts/copy-sdk.mjs
-node --test test/sdk-responses.test.mjs test/sdk-server-responses.test.mjs
+npm test
 ```
 
-Ten focused test groups cover all operations, malformed/substituted values,
-optional metadata, upload nonprogress, binary corruption and no-replay behavior.
-The HTTP integration test uses the actual router, metadata/asset registries and
-OCI upload/download code. Execution and capture results are deterministic runtime
-fixtures; it does not claim to exercise Linux namespaces or real OCI capture.
+Or run the response suites directly:
 
-The broader `sdk-structure.test.mjs` run passed its five JSON/response/schema tests.
-Four other tests failed on Windows in unchanged module-loader/plugin-packaging
-paths (drive-letter loader URL and the Linux `/workspace` require shim). Those
-failures remain separate from these response changes. A full native Linux suite
-has not been run for this audit.
+```sh
+node --test test/sdk-responses.test.mjs
+```
 
-The standalone SDK package was rebuilt and copied into the adjacent
-`test-putered/vendor/putered-sdk` project. Its two regression tests and live
-`npm start` both passed, returning the server's Node version `v24.19.0`.
+The test suite covers malformed and substituted payloads, optional metadata stripping, upload non-progress detection, binary corruption, and no-replay guarantees.

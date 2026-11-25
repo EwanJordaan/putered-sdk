@@ -1,53 +1,43 @@
-# Stored binaries and locally defined tools
+# Stored Binaries & Native Assets
 
-Upload a Linux binary or toolchain once, then keep its immutable reference in your
-source tree. Your `definePlugin`/`defineTool` code owns the schemas, handlers and
-backend choice. The stored binary never replaces that code. A future dashboard can
-upload the same bytes and give you the same reference to paste into your project.
+Upload a Linux binary or toolchain once, commit its immutable reference in your codebase, and invoke it from any native Putered plugin. Your `definePlugin` / `defineTool` code continues to own schemas, handlers, and backend selection — the asset only supplies the verified read-only executables.
 
-## Separate SDK and server
+## SDK vs. server boundaries
 
-`@putered/sdk` contains the Node HTTP client, typed definitions, upload CLI and
-optional local plugin builder. Shared wire contracts live in `src/`; client code
-lives in `src/client`. Runtime imports have no server, PostgreSQL, S3, shell or
-Python dependencies. Build tooling is isolated behind `@putered/sdk/build`.
+- **`@putered/sdk`** ships the HTTP client, typed definitions, upload CLI, and optional plugin builder (`@putered/sdk/build`). Runtime imports have no server, PostgreSQL, S3, shell, or Python dependencies.
+- **The [Putered server](https://github.com/EwanJordaan/Putered)** owns execution, sandboxing, storage adapters, and project key configuration. Storage credentials never leave the server.
 
-The [server repository](https://github.com/EwanJordaan/Putered) maintains execution,
-API handlers and storage adapters independently. Provider credentials and project
-key configuration remain on the server. See [installation](../README.md#install-from-this-repository)
-for building and packing this SDK before its npm release.
+## Upload an asset
 
-## Upload and use
-
-With `PUTERED_API_KEY` set, upload an unpacked toolchain:
+With `PUTERED_API_KEY` set, upload an unpacked Linux directory via the CLI:
 
 ```sh
-# From this repository; installed SDK consumers can use `putered` directly.
-node dist/client/cli.js assets upload ./rust-toolchain \
+putered assets upload ./rust-toolchain \
   --platform linux-x64 \
-  --entrypoint cargo=bin/cargo --entrypoint rustc=bin/rustc \
+  --entrypoint cargo=bin/cargo \
+  --entrypoint rustc=bin/rustc \
   --output ./examples/stored-assets/rust.asset.ts
 ```
 
-The CLI creates a small typed `defineAsset(...)` source file. Commit it with your
-plugin. It contains the platform, entrypoint names/paths and SHA-256-based asset ID,
-with no handler or credentials. New binary contents produce a new immutable ID;
-change the reference in code when you want to update. Uploading identical contents
-again resumes an incomplete upload or reuses the ready asset.
+This generates a small, typed `defineAsset(...)` file containing the platform, entrypoint map, and SHA-256 asset ID (no credentials or handler code). Commit it alongside your plugin. Updating binary contents produces a new immutable ID; re-uploading identical bytes resumes an incomplete upload or reuses the ready asset.
 
-The equivalent Node SDK call is:
+You can also upload programmatically from Node.js:
 
 ```ts
 const rust = await putered.assets.upload('./rust-toolchain', {
   platform: 'linux-x64',
   entrypoints: { cargo: 'bin/cargo', rustc: 'bin/rustc' },
   signal: AbortSignal.timeout(180_000),
-  onProgress: ({ completedBytes, totalBytes }) => console.log(completedBytes, totalBytes),
+  onProgress: ({ completedBytes, totalBytes }) => {
+    console.log(`${completedBytes} / ${totalBytes}`);
+  },
 });
-// rust.entrypoints.cargo is typed; unknown entrypoint names are rejected.
+// rust.entrypoints.cargo is typed; unknown entrypoints fail at compile time.
 ```
 
-Define the tool in your codebase:
+## Call an asset from a native plugin
+
+Declare the asset on your plugin and run its entrypoints with `ctx.exec()`:
 
 ```ts
 import { definePlugin, defineTool } from '@putered/sdk/plugins';
@@ -61,104 +51,78 @@ export default definePlugin({
   tools: {
     run: defineTool({
       input: z.object({}),
-      output: z.object({ stdout: z.string(), stderr: z.string(), exitCode: z.number().int() }),
-      handler: (_input, ctx) => ctx.exec(rust, 'cargo', ['run', '--offline'], {
-        env: { RUSTFLAGS: '-C linker=/usr/bin/gcc' },
+      output: z.object({
+        stdout: z.string(),
+        stderr: z.string(),
+        exitCode: z.number().int(),
       }),
+      handler: (_input, ctx) =>
+        ctx.exec(rust, 'cargo', ['run', '--offline'], {
+          env: { RUSTFLAGS: '-C linker=/usr/bin/gcc' },
+        }),
     }),
   },
 });
 ```
 
-Build it, import the resulting `.mjs`, then call it normally:
+Build the plugin, register it, and call it like any other typed tool:
 
 ```ts
 const saved = await putered.tools.use(cargo);
-const environment = await putered.environments.create({ tools: [saved] });
-const { output } = await environment.tools.call(saved, 'run', {});
-// output.exitCode, output.stdout and output.stderr are inferred from your schema.
+const env = await putered.environments.create({ tools: [saved] });
+const { output } = await env.tools.call(saved, 'run', {});
 ```
 
-See [the runnable Cargo example](../examples/stored-assets/README.md). Its workspace
-contains a small Rust program and its uploaded compiler compiles and runs it.
+See the [runnable Cargo example](../examples/stored-assets/README.md) for a complete project.
 
-`ctx.exec(asset, entrypoint, args, { cwd, env, stdin })` executes an explicitly
-declared asset inside the native sandbox. Entrypoint names autocomplete from the
-local reference. Arguments are passed directly without a shell. `stdin` supports
-strings or `Uint8Array`; results include `stdout`, `stderr`, `stdoutBase64` and
-`exitCode`. Binary output should use `stdoutBase64`. The default cwd is `/workspace`,
-and custom cwd must stay inside that workspace. Output is bounded to 4 MiB combined;
-the tool's time budget includes provisioning and terminates guest descendants.
+### Execution semantics & constraints
 
-The server mounts each asset read-only at `/tools/<asset-id>` after verifying every
-file. Entrypoint directories are added to PATH, allowing Cargo to find its uploaded
-rustc. Home directories remain writable. A V8 plugin cannot declare native assets;
-an `isolate-only` environment rejects native tools. There is no automatic backend
-fallback or installation onto the credential-bearing server host.
+- **Direct invocation:** `ctx.exec(asset, entrypoint, args, { cwd, env, stdin })` passes arguments directly without a shell. `stdin` accepts a string or `Uint8Array`; results return `{ stdout, stderr, stdoutBase64, exitCode }` (use `stdoutBase64` for binary output).
+- **Sandbox layout:** Verified assets are mounted read-only at `/tools/<asset-id>` with entrypoint directories added to `PATH` (so `cargo` can locate its uploaded `rustc`). Default `cwd` is `/workspace`, and custom `cwd` must stay inside `/workspace`. Home directories remain writable.
+- **Bounds:** Combined output is capped at **4 MiB**. The tool timeout covers provisioning and terminates guest descendants on expiry.
+- **Backend rules:** Only `native` plugins can declare assets; `isolate-only` environments reject native tools with no automatic fallback.
+- **Supported files:** Regular files and directories, ELF64 `linux-x64` / `linux-arm64` binaries, and shebang entrypoints. Symlinks, archive extraction, and automatic dependency installation are not supported. Include any required runtime support files and match the worker's architecture and libc (for example, pass `-C linker=/usr/bin/gcc` explicitly since `/etc/alternatives` is not mounted).
 
-Upload the full runtime layout your program needs, including its support files.
-This release supports regular files/directories, ELF64 Linux x64/arm64 binaries and
-shebang entrypoints. Symlinks, archive extraction and automatic dependency
-installation are unsupported. Match the worker's architecture and libc/OS libraries.
-A compiler may also require a linker, assembler, sysroot and offline dependencies.
-The example explicitly uses the worker's `/usr/bin/gcc` linker; `/etc/alternatives`
-is not mounted, so the host's `cc` alias may be unavailable. Custom images and
-installation recipes remain future work. Rust's standard library, Cargo and rustc
-can be uploaded together without depending on a preinstalled Rust toolchain.
+## Resumable HTTP upload flow
 
-## Dashboard-ready HTTP flow
+All endpoints require `Authorization: Bearer <project-key>`. Browser dashboards should proxy through their own authenticated backend rather than exposing project keys or object-storage credentials in browser code.
 
-All endpoints use `Authorization: Bearer <project-key>`. A browser-facing dashboard
-can use its own authenticated backend to call these APIs; do not expose operator
-keys or object-store credentials in browser code. Dashboard login, user membership,
-short-lived credential issuance, CORS policy and UI are deliberately left for that
-application. The server already supports separately scoped project keys.
-
-| Operation | Endpoint | Result |
+| Operation | Endpoint | Returns |
 | --- | --- | --- |
-| List | `GET /v1/assets` | Compact summaries: reference, state, totalBytes, optional error |
-| Begin/resume | `POST /v1/assets/uploads` with `{ manifest }` | Upload state and per-file offsets |
-| Check progress | `GET /v1/assets/:id/upload` | Manifest, state and acknowledged offsets |
-| Send chunk | `PUT /v1/assets/:id/upload/:sha256/:offset` | Updated offsets; raw binary request body |
-| Validate/publish | `POST /v1/assets/:id/upload/complete` with `{}` | Immutable ready reference |
+| List assets | `GET /v1/assets` | Compact summaries (`reference`, `state`, `totalBytes`, optional `error`) |
+| Begin / resume | `POST /v1/assets/uploads` (`{ manifest }`) | Upload state and per-file byte offsets |
+| Check progress | `GET /v1/assets/:id/upload` | Manifest, state, and acknowledged offsets |
+| Upload chunk | `PUT /v1/assets/:id/upload/:sha256/:offset` | Updated offsets (raw binary body, max 4 MiB) |
+| Validate & publish | `POST /v1/assets/:id/upload/complete` (`{}`) | Immutable ready `AssetReference` |
 | Get reference | `GET /v1/assets/:id` | Ready reference for local `defineAsset` |
-| Cancel | `DELETE /v1/assets/:id/upload` | Deletes incomplete/failed upload parts and frees its manifest quota |
+| Cancel upload | `DELETE /v1/assets/:id/upload` | Deletes incomplete/failed parts and frees manifest quota |
 
-A manifest is `{ format: 1, platform, entrypoints, files }`. Each file has
-`{ path, bytes, sha256, executable }`. Paths are relative, unique and traversal-free;
-entrypoints must point to executable manifest files. The server computes the ID.
-Upload chunks sequentially for each distinct file hash, from the server's offset,
-in chunks of `chunkBytes` (4 MiB; the final chunk can be shorter). Re-sending an
-identical acknowledged part is safe; conflicting data or offsets return a conflict.
-After a lost response, request status or begin again before continuing. The SDK
-implements this protocol; a browser can hash selected Files and stream Blob slices
-through the same endpoints without needing a server-local filesystem path.
+Matching SDK methods: `assets.list()`, `assets.status(id)`, `assets.get(id)`, and `assets.cancel(id)` (plus `tools.list()` for plugin manifests).
 
-States are `uploading → validating → ready` or `failed`. Validation checks full
-SHA-256 hashes, file sizes and executable architecture before returning ready.
-Failed uploads can be retried with begin or cancelled. Ready assets cannot be
-cancelled, so references in existing plugins remain valid. SDK equivalents are
-`assets.list()`, `assets.status(id)`, `assets.get(id)` and `assets.cancel(id)`.
-`tools.list()` exposes stored plugin manifests independently of assets.
+- **Manifest format:** `{ format: 1, platform, entrypoints, files }` where each file entry is `{ path, bytes, sha256, executable }`. Paths must be relative, unique, and traversal-free; entrypoints must reference executable files. The server computes the asset ID.
+- **Chunking:** Upload chunks sequentially per distinct file SHA-256 from the acknowledged offset in `chunkBytes` (4 MiB) steps. Resending an identical acknowledged part is idempotent; conflicting data or offsets return `CONFLICT`. After a dropped response, query status or call begin again before continuing.
+- **Lifecycle:** `uploading → validating → ready` (or `failed`). Validation verifies full SHA-256 hashes, file sizes, and executable architecture. Ready assets cannot be cancelled so existing plugin references stay intact.
 
-Limits: 128 asset records / 8 GiB logical declared bytes per project, 1 GiB per asset,
-512 MiB per file, 8,192 files, a 1 MiB manifest, and up to 16 declared assets per
-plugin. Plugin packages retain their separate 128-record/64 MiB registry quota.
-Cancel incomplete uploads explicitly; automatic expiry and reference-aware garbage
-collection of unreferenced content-addressed blobs are future work.
+### Quotas & limits
 
-## Storage and server configuration
+| Limit | Value |
+| --- | --- |
+| Project asset quota | 128 records / 8 GiB logical declared bytes |
+| Max asset size | 1 GiB |
+| Max single file size | 512 MiB |
+| Max files per asset | 8,192 |
+| Max manifest size | 1 MiB |
+| Max assets per plugin | 16 |
+| Plugin package quota *(separate)* | 128 records / 64 MiB |
 
-Development defaults to atomic local-disk objects and JSON metadata under the data
-directory. Disk metadata uses in-process locks and requires a single server writer.
-Production registry deployments can use an S3-compatible private bucket (including
-Cloudflare R2) for bytes and PostgreSQL for metadata/cross-process advisory locks.
-Plugin bundles and asset bytes use the same adapters. Environment metadata can also
-live in PostgreSQL; workspace files and writable homes remain on the worker's data
-volume and must be routed to that worker. This is not distributed workspace storage.
+Cancel incomplete uploads explicitly; automatic expiry and garbage collection of unreferenced blobs are planned for a future release.
+
+## Server storage configuration (operators)
+
+Development defaults to atomic local-disk objects and JSON metadata under the server data directory (single writer). Production deployments can back both plugins and assets with an S3-compatible private bucket (such as Cloudflare R2) and PostgreSQL for metadata and cross-process advisory locks:
 
 ```sh
-# Server environment only; provision your bucket and database separately.
+# Server environment only
 PUTERED_REGISTRY_DATABASE_URL=postgres://...
 PUTERED_STORAGE_BUCKET=putered-private
 PUTERED_STORAGE_ENDPOINT=https://<account-id>.r2.cloudflarestorage.com
@@ -168,25 +132,18 @@ PUTERED_STORAGE_SECRET_ACCESS_KEY=...
 PUTERED_PROJECT_KEYS_FILE=/run/secrets/putered-project-keys.json
 ```
 
-For other S3 services, set the endpoint/region appropriately and optionally
-`PUTERED_STORAGE_FORCE_PATH_STYLE=1`. HTTPS proxy environment settings are respected.
-Buckets stay private; clients never get provider keys or raw object addresses.
-Only the server configuration module reads these variables. You can instead inject
-`ArtifactStorage`/`RegistryMetadata` implementations into `createApi` for another
-provider; `putered/server` exports both interfaces and supplied adapters.
+Set `PUTERED_STORAGE_FORCE_PATH_STYLE=1` for path-style S3 endpoints; standard HTTPS proxy variables are respected. Buckets remain private, and operators can also inject custom `ArtifactStorage` / `RegistryMetadata` adapters via `putered/server`.
 
-The trusted project-keys file is an array such as:
+Project keys are configured as a JSON array:
 
 ```json
-[{ "token": "<random-project-key-of-at-least-32-characters>", "projectId": "my-project", "scopes": ["read", "upload", "execute"] }]
+[
+  {
+    "token": "<random-project-key-of-at-least-32-characters>",
+    "projectId": "my-project",
+    "scopes": ["read", "upload", "execute"]
+  }
+]
 ```
 
-Keys for the same project share its assets/tools/environments. Reads require `read`,
-asset/plugin mutations require `upload`, and environment creation/execution requires
-`execute`. Project keys cannot access legacy operator endpoints. IDs and blob hashes
-are scoped to their owner, including duplicate uploads. Development does not require
-a linked dashboard account: the configured API key determines access.
-
-These grants are foundations for a later account/dashboard layer, not a complete
-hostile multi-tenant sandbox. Apply your deployment's authentication, volume
-routing, resource isolation and operational policies before exposing it publicly.
+Keys in the same project share its assets, tools, and environments (`read` for reads, `upload` for asset/tool/preset mutations, `execute` for environment execution). Project keys cannot access legacy operator endpoints.

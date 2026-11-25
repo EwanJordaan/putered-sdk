@@ -1,101 +1,87 @@
-# Public API contract (current implementation)
+# HTTP API Contract
 
-This documents the HTTP JSON contract implemented today. It covers the account-backed API at
-`https://putered.com/api/compute/v1` (the SDK always connects to this endpoint; the public key
-gateway also exposes `https://api.putered.com/v1`) and the internal execution
-server API at `<server>/v1` for hosted-service operators. Customers use hosted
-compute; internal server routes are not an alternative customer deployment. It is not a promise that the two surfaces have identical routes or
-behavior. JSON objects shown below omit optional fields unless noted. Requests use `Content-Type:
-application/json` except binary upload parts and OCI archives.
+This reference documents the live HTTP JSON contract for Putered:
 
-## Authentication and base URLs
+- **Account API (hosted compute):** `https://putered.com/api/compute/v1` (the endpoint `@putered/sdk` uses; `https://api.putered.com/v1` is the public key gateway to the same account API).
+- **Internal execution server (operators):** `<server>/v1`.
 
-| Caller | Base URL | Credential | Boundary |
+The two surfaces do not expose identical routes. Unless noted, requests and responses use `Content-Type: application/json` (binary upload chunks and OCI archives use raw binary or OCI tar content types). Successful responses return the resource or result directly — there is no `{ success, data }` wrapper.
+
+## Authentication & base URLs
+
+| Caller | Base URL | Credential | Scope & boundary |
 | --- | --- | --- | --- |
-| Website/API account key | `https://putered.com/api/compute/v1` or `https://api.putered.com/v1` | `Authorization: Bearer pk_live_<64 lowercase hex>` | Personal account ownership, email verification, per-account quota, and key execute permission. The website Worker and public gateway translate the path to account compute. |
-| Internal execution server | `<server>/v1` | `Authorization: Bearer <token>` | Operator token has access to all local records. Configured project keys are restricted to their project and scopes. |
-| Browser dashboard | `https://putered.com/api/...` | Same-origin authenticated session cookie | Browser/session routes. Session-authenticated mutations require the configured same-origin `Origin`; cross-site fetches are rejected. Do not use these as SDK bearer-key routes. |
+| Personal account key | `https://putered.com/api/compute/v1` or `https://api.putered.com/v1` | `Authorization: Bearer pk_live_<64 hex>` | Account ownership, verified email, quota, and key `canExecute` permission (`403` on mutations when false). |
+| Internal execution server | `<server>/v1` | `Authorization: Bearer <token>` (≥ 32 chars) | Operator tokens access all local records; project keys are limited to their `projectId` and `read`/`upload`/`execute` scopes. |
+| Browser dashboard | `https://putered.com/api/...` | Same-origin session cookie | Same-origin `Origin` required on mutations. Not a bearer-key SDK surface. |
 
-The website key is checked by the account service, then proxied to the backend with a server-held
-project-scoped key and internal gateway token. The public `api.putered.com` gateway routes personal
-keys into that same account API. Never send either backend credential from a client. The
-`pk_live_...` key is not a direct-server project key. Direct server tokens must be at least 32
-characters. Project keys are configured server-side with a project ID and one or more `read`,
-`upload`, `execute` scopes. Reads require `read`; asset/tool/preset uploads require `upload`;
-command, tool-call, terminal and other execution mutations require `execute`. Capturing a preset
-requires both `upload` and `read`. Project keys cannot access operator-only routes such as plugins,
-admin status, runtime stats, and legacy workspace processes. A website key with `canExecute: false`
-can read but receives 403 on mutations.
-
-Example:
+Account keys (`pk_live_...`) are verified by the account service and proxied upstream with server-held credentials. Never send backend credentials from a client.
 
 ```sh
 curl https://putered.com/api/compute/v1/environments \
-  -H 'Authorization: Bearer pk_live_…'
-
-
+  -H "Authorization: Bearer $PUTERED_API_KEY"
 ```
 
-## Environment and command API
+## Environments & commands
 
-| Method and path | Request | Success |
+| Method & path | Request body | Success response |
 | --- | --- | --- |
-| `POST /environments` | Website: `{ "name"?: string, "template"?: "general" \| "preset_<sha256>", "settings"?: EnvironmentSettings, "env"?: EnvironmentVariables, "networkPolicy"?: OutboundPolicy }`. Direct server: `{ "template"?: "general" \| "preset_<sha256>", "tools"?: [toolId], "settings"?: EnvironmentSettings, "env"?: EnvironmentVariables, "networkPolicy"?: OutboundPolicy }`. | `201 Environment`; website includes `name`, direct does not. |
-| `GET /environments` | No body. Website only. | `200 [ { id, name, created_at } ]` (account records, newest first). Direct core has no collection route. |
-| `GET /environments/{id}` | No body. | `200 Environment`; website includes `name`. |
-| `PATCH /environments/{id}` | `{ "env"?: EnvironmentVariables, "networkPolicy"?: OutboundPolicy }`; at least one field is required. | `200 Environment` with the updated record. |
-| `DELETE /environments/{id}` | No body. Website and direct. | `200 { "id": "…", "deleted": true }`. |
-| `POST /environments/{id}/exec` | `{ "command": string, "resources"?: Resources, "queueTimeoutMs"?: 1..300000, "timeoutMs"?: 1..300000 }`. Website rejects blank or >64 KiB commands and extra fields (including SDK `wait`). Direct core also accepts optional `metered` when configured and `wait: true` as a call option. | `200 ExecutionResult` (sync); website and direct core support `?async=1` returning a command ticket; see below. |
-| `POST /environments/{id}/run` | `{ "program": string, "args"?: string[], "resources"?: Resources, "queueTimeoutMs"?: 1..300000, "timeoutMs"?: 1..300000, "wait"?: true }`. Program matches `^[a-z][a-z0-9_-]{0,63}$`; args default to `[]`, contain no NUL, are limited to 4096 entries and 64 KiB encoded JSON total. Extra fields are rejected. | `200 ExecutionResult` (sync); website and direct core support `?async=1` returning a command ticket; see below. |
-| `POST /environments/{id}/tools/call` | Direct server only: `{ "id": toolId, "tool": string, "input": any, "resources"?: Resources, "queueTimeoutMs"?: 1..300000, "timeoutMs"?: 1..300000, "wait"?: true }`. | `200 { "output": any }`. |
-| `POST /environments/{id}/preset` | Direct server only: `{ "name": string, "mode"?: "complete" \| "state", "workspace"?: [relativePath], "home"?: [relativePath] }`. | `201 Preset`. |
-| `GET /environments/{id}/terminals` | Website only. | `200 [{ id, state, created_at }]` (up to 20). |
-| `POST /environments/{id}/terminals` | Website: `{ "id": UUID, "columns"?: 20..300, "rows"?: 5..120 }`. Direct server also supports this path with `{ "id": UUID, "environmentId": id, "columns"?: 20..300, "rows"?: 5..120 }`. | `202 TerminalSession`. |
+| `POST /environments` | `{ name?, persistence?, execution?, template?, tools?, settings?, env?, networkPolicy? }` *(website accepts `name`, not `tools`; direct accepts `tools`, not `name`)* | `201 Environment` |
+| `GET /environments` | — *(website only)* | `200 [{ id, name, created_at }]` (newest first) |
+| `GET /environments/{id}` | — | `200 Environment` |
+| `PATCH /environments/{id}` | `{ env?, networkPolicy? }` (at least one required) | `200 Environment` |
+| `DELETE /environments/{id}` | — | `200 { id, deleted: true }` |
+| `POST /environments/{id}/stop` | `{}` | `200 { id, stopped: true }` |
+| `POST /environments/{id}/resume` | `{}` | `200 Environment` |
+| `POST /environments/{id}/exec` | `{ command, resources?, queueTimeoutMs?, timeoutMs?, requestId? }` (`command` nonempty, ≤ 64 KiB; direct also accepts `metered`, `wait`) | `200 ExecutionResult` (or `202` ticket with `?async=1`) |
+| `POST /environments/{id}/run` | `{ program, args?, cwd?, env?, stdinBase64?, stdinOpen?, sudo?, resources?, queueTimeoutMs?, timeoutMs?, requestId?, wait? }` | `200 ExecutionResult` (or `202` ticket with `?async=1`) |
+| `POST /environments/{id}/tools/call` | Direct only: `{ id, tool, input, resources?, queueTimeoutMs?, timeoutMs?, wait? }` | `200 { output }` |
+| `POST /environments/{id}/preset` | Direct only: `{ name, mode?: "complete" \| "state", workspace?, home? }` | `201 Preset` |
+| `GET /environments/{id}/terminals` | — *(website only)* | `200 [{ id, state, created_at }]` (up to 20) |
+| `POST /environments/{id}/terminals` | `{ id: UUID, columns?: 20..300, rows?: 5..120 }` *(direct also accepts `environmentId`)* | `202 TerminalSession` |
 
-`EnvironmentSettings` accepts `resources?: Resources` for saved CPU/RAM defaults, alongside these fields: `saveScope?: "entire-environment" |
-"workspace-only"`, `git?: boolean`, `execution?: { mode: "auto" | "isolate-only" | "native-only" }`,
-`network?: { mode: "disabled" } | { mode: "internet", maxBytesPerExecution?: 1..1073741824, allow?:
-[rule], deny?: [rule], vm?: {allow?,deny?}, v8?: {allow?,deny?} }`. Rules are hostnames,
-`*.hostname`, IPs, CIDRs, or HTTP(S) origins without paths/ports; each list is limited to 128 rules.
-`timeoutMs?: 1..300000`. Omitted settings use the server defaults. The website API defaults a newly
-created environment to `network: { mode: "disabled" }`; direct core defaults come from the server.
-Website create additionally accepts a 1–100 character `name` and defaults it to `My environment`.
-
-The SDK accepts this optional display name as `environments.create({ name })`.
-It trims surrounding whitespace and requires 1–100 characters afterward. Named
-creation requires the server response to contain exactly that normalized name;
-a missing or mismatched name is a `PROTOCOL_ERROR`. Create/connect preserve the
-optional field through `environment.name` and `environment.describe().name`.
-Unnamed core responses remain compatible when `name` is omitted. Names are not
-unique identifiers; reconnect using `environment.id`. Existing environments
-cannot currently be renamed through the SDK.
-
-Environment wire example:
+### Environment record & settings
 
 ```json
 {
   "id": "env_demo",
+  "name": "Demo",
   "tools": [],
-  "settings": { "network": { "mode": "disabled" } },
-  "name": "Demo"
+  "persistence": "full",
+  "settings": { "network": { "mode": "disabled" } }
 }
 ```
 
-`EnvironmentVariables` is a map from POSIX-style variable names to NUL-free
-strings, limited to 64 KiB encoded JSON. Authored `OutboundPolicy` values are
-limited to 64 KiB encoded JSON; policy readback can reach 256 KiB after header
-values are redacted. `OutboundPolicy` is `"allow-all"`,
-`"deny-all"`, a list of allowed host patterns, or a host-to-rules map. Rules
-may match exact or prefix paths and HTTP methods before adding outbound headers;
-an unmatched request can use a `{ "response": { "statusCode": 403 } }` rule.
-Readback may replace transformed header values with `"<redacted>"`.
+- **`name`** (website): trimmed string, 1–100 characters (defaults to `"My environment"`). Not unique; reconnect by `id`.
+- **`persistence`**: `"full"` (default), `"workspace"`, `"workspace-and-dependencies"`, `"none"`, or `{ mode: "custom", include, exclude }`. Fixed at creation.
+- **`execution`**: `{ default?: "native" | "v8" | "auto", programs?: Record<string, "native" | "v8" | "auto"> }`.
+- **`settings`**:
+  - `resources?: { cpu?: number, memoryMiB?: number }`
+  - `git?: boolean`
+  - `execution?: { mode: "auto" | "isolate-only" | "native-only", allowSudo?: boolean }`
+  - `network?: { mode: "disabled" } | { mode: "internet", maxBytesPerExecution?: 1..1073741824, allow?, deny?, vm?, v8? }` (rules: hostnames, `*.hostname`, IPs, CIDRs, or HTTP(S) origins without paths/ports; max 128 per list)
+  - `timeoutMs?: 1..300000`
+- **`env`**: POSIX variable map to NUL-free strings, ≤ 64 KiB JSON.
+- **`networkPolicy`**: `"allow-all"`, `"deny-all"`, `{ allow: [domain, ...] }`, or `{ allow: { [domain]: OutboundRule[] } }` (rules match exact/prefix paths and methods to add headers, or return `{ response: { statusCode } }`). Authored ≤ 64 KiB JSON; readback ≤ 256 KiB with transformed header values redacted to `"<redacted>"`.
 
-Execution response is the server's actual result object; `output` is **not** a JSON field:
+### Execution request & result
 
-Successful JSON responses contain the resource or result directly; there is no
-shared `{success,data}` wrapper. Failed HTTP responses use the error object
-documented below. A completed program with a nonzero exit code is an execution
-result, not necessarily an HTTP failure.
+```sh
+curl 'https://putered.com/api/compute/v1/environments/env_demo/exec' \
+  -H "Authorization: Bearer $PUTERED_API_KEY" \
+  -H 'Content-Type: application/json' \
+  --data '{"command":"printf hello","timeoutMs":30000}'
+```
+
+For `POST /environments/{id}/run`:
+
+- `program` must match `^[a-z][a-z0-9_-]{0,63}$`.
+- `args` defaults to `[]`, NUL-free, ≤ 4,096 entries and ≤ 64 KiB encoded JSON.
+- `cwd` must be `/workspace` or a descendant without NUL or `..`.
+- `env` and static `stdinBase64` are each capped at 64 KiB; complete request JSON is capped at 256 KiB.
+- `sudo: true` requires `settings.execution.allowSudo: true` and is rejected on direct Wasm Git.
+
+A completed command with a nonzero `exitCode` still returns HTTP `200` with an `ExecutionResult`:
 
 ```json
 {
@@ -110,265 +96,116 @@ result, not necessarily an HTTP failure.
 }
 ```
 
-| Execution field | Type | Required | Meaning |
+| Field | Type | Required | Description |
 | --- | --- | --- | --- |
-| `stdout` | string | Yes | UTF-8 decoding of collected stdout. Can be empty. |
-| `stdoutBase64` | string | Yes | Original stdout bytes in canonical base64. |
-| `stderr` | string | Yes | Collected stderr. Can be empty. |
-| `exitCode` | integer | Yes | Program exit status; zero conventionally indicates success. |
-| `durationMs` | nonnegative number | Yes | Recorded execution duration in milliseconds. |
-| `hostDurationMs` | nonnegative number | Yes | Host-side request execution duration in milliseconds. |
-| `allocationUsage` | object | No | Effective limits, allocated RAM time and measured CPU usage used for billing. |
-| `networkUsage` | object | No | Network byte and connection measurements. |
-| `gitMetrics` | array | No | Git execution measurements. |
-| `pythonMetrics` | object | No | Python backend and execution measurements. |
+| `stdout` | `string` | Yes | UTF-8 decoding of stdout (may be empty) |
+| `stdoutBase64` | `string` | Yes | Raw stdout bytes in canonical base64 |
+| `stderr` | `string` | Yes | Collected stderr (may be empty) |
+| `exitCode` | `integer` | Yes | Process exit status |
+| `durationMs` | `number` | Yes | Execution duration in milliseconds |
+| `hostDurationMs` | `number` | Yes | Host-side duration in milliseconds |
+| `memoryLimitExceeded` | `boolean` | No | `true` when killed by memory cgroup OOM |
+| `allocationUsage` | `object` | No | `{ enforced: true, durationMs, cpuQuotaMicros, memoryBytes, cpuMicros? }` |
+| `networkUsage` | `object` | No | `{ sentBytes, receivedBytes, connections, limitBytes }` |
+| `gitMetrics` | `array` | No | `[{ durationMs, wasmMemoryBytes, helperCount }]` |
+| `pythonMetrics` | `object` | No | `{ backend: "wasm" \| "native", warm, sessionId?, initMs, executionMs, rssBytes, cpuMicros?, wasmMemoryBytes? }` |
 
-In the SDK, `exec()` adds the string property `result.output` and throws
-`CommandError` for a nonzero exit unless `check: false` is set. `output` joins
-stdout followed by stderr; it is non-enumerable and is omitted by
-`JSON.stringify(result)`. It does not preserve interleaving between streams.
-`environment.run(program, args, options)` uses this same result and error contract.
-Its argument vector is forwarded as individual strings; it is never shell-quoted
-or parsed by the SDK. Direct Git runs use offline Wasm Git. Explicit `sh`/`bash`
-commands use the native VM route and the environment's stored network policy;
-choosing a program does not grant network authority. `native-only` rejects direct
-Wasm Git, and `isolate-only` rejects every non-Git direct program.
-Other direct programs use the native sandbox. OCI images configured with a
-non-root UID or GID must use explicit shell Git so the image's ownership is
-preserved; direct Wasm Git rejects that case before executing.
+> `output` is **not** a wire field — the SDK computes `stdout + stderr` locally as a non-enumerable property.
 
-The SDK's `run()` accepts optional `cwd`, `env`, `stdinBase64`, `stdinOpen` and
-`sudo` fields. The program/argument vector is bounded to 64 KiB, environment data
-to 64 KiB, static stdin to 64 KiB, and the complete JSON request to 256 KiB.
-`cwd` is an absolute path equal to `/workspace` or below it, without NUL or `..`.
-Environment keys must be valid shell-style identifiers. Static stdin is canonical base64; streaming clients set `stdinOpen`
-and then send chunks to the accepted command's input route. Sudo requires
-`settings.execution.allowSudo: true` on the environment. Direct Wasm Git does not
-support sudo or interactive stdin.
+### Async execution, streaming & signals
 
-Minimal account command request (replace the environment ID and key):
+Pass `?async=1` to `POST /environments/{id}/exec` or `/run` to submit once and receive `202 { jobId, state: "running", commandPath? }`:
 
-```sh
-curl 'https://putered.com/api/compute/v1/environments/env_demo/exec' \
-  -H "Authorization: Bearer $PUTERED_API_KEY" \
-  -H 'Content-Type: application/json' \
-  --data '{"command":"printf hello","timeoutMs":30000}'
-```
+- **Gateway tickets** (no `commandPath`): poll `GET /execution-jobs/{jobId}` for `{ id, environmentId, state, phase?, httpStatus?, result?, error? }`.
+- **Command tickets** (with `commandPath`): use the interactive command routes below.
 
-`memoryLimitExceeded?: boolean` indicates that the sandbox exceeded its RAM ceiling.
-Optional result fields have these shapes: `allocationUsage: { enforced: true, durationMs: integer,
-cpuQuotaMicros: positive integer, memoryBytes: positive integer, cpuMicros?: nonnegative integer }`; `networkUsage: { sentBytes,
-receivedBytes, connections, limitBytes }` (all nonnegative integers); `gitMetrics: [{ durationMs,
-wasmMemoryBytes, helperCount }]`; `pythonMetrics: { backend: "wasm" | "native", warm: boolean,
-sessionId?, initMs, executionMs, rssBytes, cpuMicros?, wasmMemoryBytes? }`. Metrics may be absent
-when not applicable. `stdoutBase64` is canonical base64 for stdout bytes; `stdout` is its UTF-8
-decoding. `stderr` is separate. The SDK adds a local `result.output` convenience string equal to
-`stdout + stderr` (no separator); HTTP clients must combine the two themselves. Separate streams do
-not preserve chronological interleaving. A nonzero `exitCode` is still a successful HTTP execution
-response.
-
-### Async execution and durability
-
-For the website endpoints, `POST /environments/{id}/exec?async=1` and
-`POST /environments/{id}/run?async=1` submit once and return `202 {
-"jobId": "<uuid>", "state": "running" }`. Poll `GET /execution-jobs/{jobId}`. The gateway-backed job
-response is `{ id, environmentId, state, httpStatus?, result?, error? }`, with state `running`,
-`completed`, `failed`, or `unknown`. `completed` contains `result: ExecutionResult`; `failed`
-contains `result: { error, code? }` and `httpStatus`. Website `async=1` works even when the client
-requests a long task, and metered website runs also use this job path.
-
-Gateway tickets omit `commandPath`; poll `GET /execution-jobs/{jobId}`. Direct
-core tickets include `commandPath: "/environments/{id}/commands/{jobId}"` and
-use the command routes below. Completed jobs contain `result: ExecutionResult`;
-failed jobs contain an error and HTTP status. `unknown` means the server cannot
-prove whether an interrupted command completed. Never replay a command after a
-timeout, disconnect, ambiguous submission or unknown outcome.
-
-Interactive and detached SDK runs use the command route, which carries bounded
-incremental output and ordered stdin writes:
-
-| Method and path | Request | Success |
+| Method & path | Request | Response |
 | --- | --- | --- |
-| `GET /environments/{id}/commands/{uuid}?cursor=N` | No body | Snapshot `{ id, environmentId, state, createdAt, cursor, output: [{stream, data}], reset?, httpStatus?, result?, error? }`; output `data` is canonical base64, `reset: true` signals lost history |
-| `POST /environments/{id}/commands/{uuid}/input` | `{ sequence, input?: base64, close?: true }` | `{ nextSequence }`; omit `input` to close stdin |
-| `POST /environments/{id}/commands/{uuid}/signal` | `{ signal: "SIGTERM" | "SIGKILL" | "SIGINT" | "SIGHUP" | "SIGQUIT" | "SIGSTOP" | "SIGCONT" }` | `{ accepted: true }` |
+| `GET /environments/{id}/commands/{uuid}?cursor=N` | — | `{ id, environmentId, state, phase?, createdAt, cursor, output: [{ stream, data }], reset?, httpStatus?, result?, error? }` |
+| `POST /environments/{id}/commands/{uuid}/input` | `{ sequence, input?: base64, close?: true }` (≤ 32 KiB per chunk, zero-indexed) | `{ nextSequence }` |
+| `POST /environments/{id}/commands/{uuid}/signal` | `{ signal: "SIGTERM" \| "SIGKILL" \| "SIGINT" \| "SIGHUP" \| "SIGQUIT" \| "SIGSTOP" \| "SIGCONT" }` | `{ accepted: true }` |
 
-Each stdin chunk is at most 32 KiB and sequences begin at zero. The SDK never
-replays a command when collecting output or reconnecting to a command ID.
+States are `running`, `completed`, `failed`, or `unknown`. `unknown` means the server cannot prove whether an interrupted command finished — never replay a command automatically after a timeout, disconnect, or `unknown` state.
 
-### Terminal sessions (website-backed route)
+## Terminal sessions
 
-| Method and path | Request | Success |
+| Method & path | Request | Success |
 | --- | --- | --- |
-| `POST /environments/{id}/terminals` | Website: `{ "id": UUID, "columns"?: 20..300, "rows"?: 5..120 }`; direct server also accepts explicit `environmentId` | `202 TerminalSession` |
-| `GET /environments/{id}/terminals` | No body | `200 [{id,state,created_at}]` |
-| `GET /terminals/{uuid}?cursor=N` | No body | `200 TerminalSession` with up to 64 KiB base64 `output`, `cursor`, and `reset` |
-| `POST /terminals/{uuid}/input` | `{ "sequence": integer, "input"?: base64, "columns"?: 20..300, "rows"?: 5..120 }` | `200 { "nextSequence": integer }` |
-| `DELETE /terminals/{uuid}` | No body | `200 TerminalSession` after stop |
+| `POST /environments/{id}/terminals` | `{ id: UUID, columns?: 20..300, rows?: 5..120 }` | `202 TerminalSession` |
+| `GET /environments/{id}/terminals` | — *(website only)* | `200 [{ id, state, created_at }]` |
+| `GET /terminals/{uuid}?cursor=N` | — | `200 TerminalSession` (up to 64 KiB base64 `output`, `cursor`, `reset`) |
+| `POST /terminals/{uuid}/input` | `{ sequence, input?: base64, columns?, rows? }` | `200 { nextSequence }` |
+| `DELETE /terminals/{uuid}` | — | `200 TerminalSession` |
 
-Direct core also accepts `POST /terminals` with `{id,environmentId,columns?,rows?}`. A session
-record includes `id`, `environmentId`, `state`, `createdAt`, `expiresAt`, and `nextSequence`; it can
-include `exitCode`, `error`, `allocationUsage`, and `containmentUncertain`. States are `starting`,
-`running`, `stopping`, `saving`, `closed`, `failed`, `unknown`. Output is base64 in the HTTP
-`output` field. Cursors are byte offsets; `reset: true` means older output was discarded. Inputs are
-sequenced: resend the same sequence only to receive its current acknowledgement; out-of-order input
-conflicts. Terminals require an isolated native environment and server-enforced resource limits.
-Sessions stop after one hour, five minutes without input, or 45 seconds without a reader. Website
-routes are account-owned; direct core also has `/v1/terminals` and `POST
-/v1/environments/{id}/terminals` for configured operator/project-key deployments.
+Direct servers also accept `POST /terminals` with `environmentId`. Session states are `starting`, `running`, `stopping`, `saving`, `closed`, `failed`, `unknown`. Inputs are strictly sequenced (resending the same sequence returns its acknowledgement; out-of-order sequences conflict). Sessions stop after **1 hour**, **5 minutes** without input, or **45 seconds** without a reader.
 
-## Assets, tools and OCI presets (direct API)
+## Assets, tools, and OCI presets (direct API)
 
-These registry routes exist on the direct server under `/v1`; account website keys support
-environment execution, terminal, and preset operations, not the full binary asset/tool registry. The
-website's `/api/presets...` routes are a separate account-owned OCI catalog described below.
+These registry routes live on the direct server under `/v1`. Personal account keys support environment execution, terminals, and account-owned presets/preset-operations, not the full binary asset/tool registry.
 
-| Method and path | Request | Success |
+| Method & path | Request | Success |
 | --- | --- | --- |
 | `GET /assets` | — | `200 [AssetSummary]` |
 | `GET /assets/{assetId}` | — | `200 AssetReference` |
-| `POST /assets/uploads` | `{ "manifest": AssetManifest }` | `200 AssetUpload` |
-| `PUT /assets/{assetId}/upload/{sha256}/{offset}` | Raw chunk bytes, max 4 MiB | `200 AssetUpload` |
+| `POST /assets/uploads` | `{ manifest: AssetManifest }` | `200 AssetUpload` |
+| `PUT /assets/{assetId}/upload/{sha256}/{offset}` | Raw chunk (≤ 4 MiB) | `200 AssetUpload` |
 | `GET /assets/{assetId}/upload` | — | `200 AssetUpload` |
 | `POST /assets/{assetId}/upload/complete` | `{}` | `200 AssetReference` |
-| `DELETE /assets/{assetId}/upload` | — | `200 { "cancelled": true }` |
+| `DELETE /assets/{assetId}/upload` | — | `200 { cancelled: true }` |
 | `GET /tools` | — | `200 [StoredTool]` |
 | `GET /tools/{toolId}` | — | `200 StoredTool` |
-| `POST /tools/use` | `{ "artifact": ToolArtifact }` | `200 StoredTool` |
+| `POST /tools/use` | `{ artifact: ToolArtifact }` | `200 StoredTool` |
 | `GET /presets` | — | `200 [Preset]` |
 | `GET /presets/{presetId}` | — | `200 Preset` |
-| `DELETE /presets/{presetId}` | Account API only; no body | `200 {"id":"preset_<sha256>","deleted":true}` |
+| `DELETE /presets/{presetId}` | — *(account API only)* | `200 { id, deleted: true }` |
 | `GET /presets/{presetId}/archive` | — | Binary OCI tar (`application/vnd.oci.image.layout.v1+tar`) |
-| `POST /presets?name={name}` | OCI tar body, `Content-Type: application/vnd.oci.image.layout.v1+tar`, max 1 GiB | `201 Preset` |
-| `POST /preset-operations` | Capture: `{id:UUID,name,kind:"capture",environmentId}`; upload: `{id:UUID,name,kind:"upload",bytes:1024..1073741824}` | `202 PresetOperation` |
+| `POST /presets?name={name}` | Raw OCI tar (≤ 1 GiB) | `201 Preset` |
+| `POST /preset-operations` | Capture: `{ id, name, kind: "capture", environmentId }` · Upload: `{ id, name, kind: "upload", bytes: 1024..1073741824 }` | `202 PresetOperation` |
 | `GET /preset-operations/{uuid}` | — | `200 PresetOperation` |
-| `PUT /preset-operations/{uuid}/parts/{index}` | Ordered raw part, max 8 MiB; exact expected size | `200 {index,bytes,sha256}` |
+| `PUT /preset-operations/{uuid}/parts/{index}` | Ordered raw part (≤ 8 MiB, exact expected size) | `200 { index, bytes, sha256 }` |
 | `POST /preset-operations/{uuid}/complete` | `{}` | `202 PresetOperation` |
-| `DELETE /preset-operations/{uuid}` | Upload can be cancelled only while `uploading` | `200 PresetOperation` |
+| `DELETE /preset-operations/{uuid}` | — *(only while `uploading`)* | `200 PresetOperation` |
 
-An `AssetManifest` is `{format:1, platform:"linux-x64"|"linux-arm64",
-entrypoints:{name:relativePath}, files:[{path,bytes,sha256,executable}]}`. Each path is relative and
-traversal-free; each entrypoint must name an executable file. An `AssetReference` is
-`{id:"asset_<sha256>",platform,entrypoints}`. Upload states are `uploading`, `validating`, `ready`,
-`failed`; `AssetUpload` includes `manifest`, per-file digest `offsets`, `chunkBytes:4194304`, and
-optional `error`.
+- **Preset operation states:** `uploading`, `running`, `ready`, `failed`, `unknown`, `cancelled`. Operation IDs are UUIDs and cannot be reused for a different request.
+- **Account key responses:** Starting a preset operation returns `202 { id, state }`; polling returns `{ id, state, result?, error?, uploadedBytes, partBytes: 8388608 }`. Deleting an account snapshot removes the catalog entry and storage charge when unreferenced; existing environments remain intact.
 
-A `Preset` includes `id`, `name`, `format:"oci"`, `state:"ready"`, `visibility:"private"`,
-`platform:{os:"linux",architecture:"amd64"|"arm64"}`, `manifestDigest`, `archiveSha256`, `bytes`,
-`source:"upload"|"capture"`, and optional `environmentId`, `runtime`, `compression`, `captureScope`,
-and `defaults`. Snapshot operation records include `id`, `name`, `kind`, optional
-`environmentId`/`bytes`, `state`, `createdAt`, `parts`, optional `completedAt`, `result`, `error`.
-States are `uploading`, `running`, `ready`, `failed`, `unknown`, `cancelled`. Results are durable to
-inspect, but interrupted capture/publication can be `unknown`; do not repeat a side-effecting
-operation under a new ID until its outcome is understood. Operation IDs are UUIDs and cannot be
-reused for a different request.
+## Per-execution resources & queueing
 
-For account keys, starting a snapshot operation returns only `{id,state}` with
-HTTP 202. Poll `GET /preset-operations/{id}` for `{id,state,result?,error?,
-uploadedBytes,partBytes}`; `partBytes` is 8,388,608. The finished `result` is a
-`Preset`. Direct-server operations additionally expose their stored timestamps
-and part metadata. Account snapshot deletion removes the catalog entry and its
-retained-storage charge when no other account snapshot uses that archive;
-existing environments remain intact. Shared backend archive cleanup is separate.
+- **`Resources`:** `{ cpu?: number, memoryMiB?: number }`. CPU uses `0.25` vCPU steps (min `0.25`); RAM uses `256 MiB` steps (min `256`).
+- **Caps:** Current hosted availability caps at **1 vCPU / 1024 MiB** (entitlement ceilings: Plus `2 vCPU / 2048 MiB`, Pro `8 vCPU / 8192 MiB`). Oversized requests reject before execution.
+- **Queueing:** `queueTimeoutMs` is `1–300000` ms (default `120000`), independent of `timeoutMs`. Admission reserves the full RAM ceiling in FIFO order; CPU shares fairly under contention with no guaranteed minimum. Queue time is not billed.
+- **Enforcement:** Routes that cannot enforce requested resource limits fail with `POLICY_DENIED` before effects. RAM OOM kills report `memoryLimitExceeded: true`.
 
-## Website account routes outside `/api/compute`
+## Errors & status codes
 
-These are same-origin, session-authenticated routes used by the website UI. Mutations require
-same-origin `Origin` and reject cross-site fetches. They are not general bearer-key API routes.
+Direct servers emit `{ error, code, allocationUsage?, containmentUncertain? }`; the account Worker emits `{ error, code }`.
 
-| Route | Methods and response |
-| --- | --- |
-| `/api/dashboard` | `GET { environments, totals, recent, activity, computeQuota, refreshedAt, storageBytes, billing }` |
-| `/api/keys` | `GET [key metadata]`; `POST {name, canExecute?}` → `201 {id,key,name,revealOnce:true}` (secret is returned once); `/api/keys/{id}` `DELETE` → `{revoked:true}` |
-| `/api/usage` | `GET { executions, durationMs, computeQuota, recent }` |
-| `/api/billing`, `/api/billing/checkout`, `/api/billing/portal` | Account billing actions and summaries; response varies by action. |
-| `/api/ssh-keys...`, `/api/ssh/control` | Website SSH key and control-plane routes. |
-| `/api/presets...`, `/api/preset-operations...` | Account-owned preset catalog and durable image operations; structure follows `Preset`/`PresetOperation`, with list entries adding `createdAt` and operation responses adding `uploadedBytes`/`partBytes`. |
-| `/api/terminals/{uuid}[ /input]` | Account-owned terminal polling, input, and stop routes. |
-
-`/api/compute/...` is the one account Worker prefix that accepts personal API keys.
-`/api/environments/...`, `/api/terminals/...`, and `/api/presets/...` without `/compute` are
-browser/session routes. The `/api/compute/v1` surface deliberately does not mirror every standalone
-server route (for example direct `tools`, `assets`, admin, plugin, and billing inspection APIs are
-not generally exposed to personal keys).
-
-## Timeouts, cancellation and error JSON
-
-Execution `timeoutMs` defaults to 30,000 ms and is limited to 300,000 ms. A timeout or client
-disconnect can happen after partial filesystem or external effects; the HTTP caller must treat a
-lost response as ambiguous. The direct server emits JSON errors as `{ "error": string, "code":
-ErrorCode, "allocationUsage"?: object, "containmentUncertain"?: true }`. The account Worker normally
-emits `{ "error": string, "code": string }`. HTTP status and code pairs in the core are:
-
-| HTTP | Code |
+| HTTP | Error codes |
 | ---: | --- |
-| 400 | `INVALID_INPUT`, `PACKAGE_INVALID` |
-| 401 | `UNAUTHORIZED` |
-| 403 | `POLICY_DENIED` |
-| 404 | `NOT_FOUND` |
-| 409 | `CONFLICT` |
-| 413 | `PAYLOAD_TOO_LARGE` |
-| 429 | `QUOTA_EXCEEDED` |
-| 499 | `CANCELLED` |
-| 502 | `INVALID_OUTPUT`, `PROTOCOL_ERROR` |
-| 503 | `NETWORK_ERROR` |
-| 504 | `TIMEOUT` |
-| 500 | `EXECUTION_FAILED`, `STORAGE_ERROR`, `INTERNAL_ERROR` (other codes default to 500) |
-
-Example:
+| `400` | `INVALID_INPUT`, `PACKAGE_INVALID` |
+| `401` | `UNAUTHORIZED` |
+| `403` | `POLICY_DENIED` |
+| `404` | `NOT_FOUND` |
+| `409` | `CONFLICT` |
+| `413` | `PAYLOAD_TOO_LARGE` |
+| `429` | `QUOTA_EXCEEDED` |
+| `499` | `CANCELLED` |
+| `502` | `INVALID_OUTPUT`, `PROTOCOL_ERROR` |
+| `503` | `NETWORK_ERROR` |
+| `504` | `TIMEOUT` |
+| `500` | `EXECUTION_FAILED`, `STORAGE_ERROR`, `INTERNAL_ERROR` |
 
 ```json
 { "error": "Environment is busy.", "code": "CONFLICT" }
 ```
 
-The gateway's internal execution-job admission errors are a legacy exception:
-`scripts/public-api.mjs` can return `{error}` without `code`; when job storage is unconfigured it
-returns 503 `{error}`. The account Worker wraps its own errors with a code, usually preserving
-backend status/message. Unknown internal errors are deliberately generic on the website (`500
-{"error":"Account request failed. Please try again.","code":"INTERNAL_ERROR"}`). `allocationUsage`
-may accompany failures and affects billing settlement; clients should preserve unrecognized additive
-fields.
+## Website session routes (outside `/api/compute`)
 
-## Known surface differences and contract gaps
+Browser routes under `/api/dashboard`, `/api/keys`, `/api/usage`, `/api/billing/*`, `/api/ssh-keys/*`, `/api/presets/*`, `/api/preset-operations/*`, and `/api/terminals/*` use same-origin session cookies and reject cross-site mutations. Use `/api/compute/v1/...` for bearer-key API access.
 
-- Website account routes add account `name` and ownership metadata; core environment records do not. Website environment creation accepts `name` and does not accept `tools`; direct creation accepts `tools` but has no account name.
-- Website environment listing exists at `GET /api/compute/v1/environments`; the core `/v1/environments` router has no GET collection route.
-- Website `?async=1` uses the gateway's durable `/execution-jobs` adapter. Direct core `/v1` command runs return command tickets with per-environment command routes; `exec` keeps its existing synchronous response unless async command support is selected.
-- SDK `output` is convenience-only. The wire result uses separate `stdout`, `stdoutBase64`, and `stderr` fields.
-- Website personal keys do not expose the complete core plugin/asset/tool interface. Website snapshots use account-owned preset operation endpoints, while direct server preset upload also accepts one raw OCI tar POST.
-- HTTP timeout limits differ by layer: account upstream calls use the command timeout plus a 10-second allowance, the public gateway permits a 330-second upstream connection, direct server request timeout is 30 seconds for receiving a request, and SDK async polling is capped at 30 minutes. None of these creates an idempotent command retry guarantee.
+## Known surface differences
 
-## Per-execution resources and queueing
-
-`Resources` is `{ cpu?: number, memoryMiB?: number }`.
-`settings.resources` stores optional environment defaults. `exec`, `run` and tool
-call options accept `resources: { cpu?: number, memoryMiB?: number }` as field-wise
-overrides. CPU uses quarter-vCPU increments (minimum 0.25), and RAM uses 256 MiB
-increments (minimum 256). Current availability is capped at 1 vCPU / 1024 MiB;
-larger sizes reject before execution. The account API additionally enforces Plus
-2 vCPU / 2048 MiB and Pro 8 vCPU / 8192 MiB entitlement ceilings.
-
-`queueTimeoutMs` is 1–300000 (default 120000), independent of `timeoutMs`.
-Admission reserves the entire RAM ceiling; CPU shares fairly under contention,
-up to each request's ceiling. A task may receive less CPU without changing its
-requested maximum. FIFO memory admission prevents smaller tasks starving a
-larger waiter. There is no guaranteed minimum CPU share. Queue time is not billed.
-A queue timeout stops waiting for compute; automatic initialization may already
-have changed files. A running timeout may also leave partial file changes. Automatic Git initialization uses the same limits and
-shares the execution-time budget with the main command.
-
-Async snapshots retain `state: "running"` while queued and may include
-`phase: "queued" | "running"`. Cancelling queued work removes it from admission;
-running cancellation waits for descendant cleanup before releasing its RAM.
-After an ambiguous response or restart, inspect the command ID; never replay it.
-`allocationUsage.cpuMicros` measures aggregate CPU consumed by the sandbox and its
-descendants. RAM OOM is reported as top-level `memoryLimitExceeded: true` when a
-completed process was killed by its memory cgroup. RAM is not automatically grown.
-Resource enforcement must be available before execution; unsupported routes fail
-with `POLICY_DENIED`, with no fallback after effects.
-
-Explicit `queueTimeoutMs` on an offline automatic shell selects native execution;
-`isolate-only` shell environments reject this combination before effects. Direct
-Wasm Git with an explicit queue budget requires cgroup enforcement. Gateway
-async `exec` and `run` both use controllable core command tickets, even when
-resource overrides are omitted.
+- **Names vs. tools:** Website `POST /environments` accepts `name` (not `tools`); direct core accepts `tools` (not `name`).
+- **Environment listing:** `GET /api/compute/v1/environments` exists on the website API; direct core has no collection route.
+- **Async tickets:** Website `?async=1` uses the gateway's durable `/execution-jobs` adapter; direct core returns per-environment command tickets.
+- **Timeout layers:** Account upstream adds 10s to the command timeout; public gateway allows 330s; direct server request read timeout is 30s; SDK async polling caps at 30 minutes. None of these provide idempotent retries.

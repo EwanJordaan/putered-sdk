@@ -1,18 +1,17 @@
-# Putered SDK
+# @putered/sdk
 
-The Putered TypeScript SDK connects Node.js applications to hosted Putered.
-It creates and reconnects to persistent environments, runs commands, and can
-call typed tools. Create an API key in the [Putered console](https://putered.com).
+TypeScript SDK for [Putered](https://putered.com). Create persistent Linux environments, run commands or typed tools, and reconnect to saved workspaces by ID.
 
-Requires Node.js 22.13 or later.
+Requires Node.js 22.13+ and an API key from the [Putered console](https://putered.com).
 
-## Install
+## Installation
 
 ```sh
-npm install @putered/sdk@0.4.0
+npm install @putered/sdk
 ```
 
-To build a local tarball instead:
+<details>
+<summary>Build a local tarball from source</summary>
 
 ```sh
 git clone https://github.com/EwanJordaan/putered-sdk.git
@@ -22,14 +21,13 @@ npm run build
 npm pack
 ```
 
-Install the generated tarball in your application with `npm install
-/path/to/putered-sdk-<version>.tgz`.
+Install the tarball with `npm install /path/to/putered-sdk-<version>.tgz`.
 
-## Connect to Putered
+</details>
 
-Set `PUTERED_API_KEY` in the application’s private environment, then create an
-environment. The SDK connects to hosted Putered compute. Hosted compute requires
-an active subscription and available credits:
+## Basic usage
+
+Set `PUTERED_API_KEY` in your server environment (never in browser code):
 
 ```ts
 import { Putered } from '@putered/sdk';
@@ -37,57 +35,84 @@ import { Putered } from '@putered/sdk';
 const putered = new Putered({
   apiKey: process.env.PUTERED_API_KEY!,
 });
-const environment = await putered.environments.create();
-await environment.exec("printf 'hello\\n' > hello.txt");
-console.log((await environment.exec('cat hello.txt')).output);
-console.log((await environment.run('git', ['status', '--short'])).output);
 
-// Persist this ID to reconnect in a later process.
-console.log(environment.id);
+const env = await putered.environments.create({ name: 'my-agent' });
+
+await env.exec("printf 'hello\\n' > hello.txt");
+console.log((await env.exec('cat hello.txt')).output); // => hello
+console.log((await env.run('git', ['status', '--short'])).output);
+
+// Save this ID to reconnect later:
+console.log(env.id); // => env_...
 ```
 
-Create environments with top-level `persistence: "workspace"`,
-`"workspace-and-dependencies"`, `"full"` or `"none"`, or a custom
-`{ mode: "custom", include: [...], exclude: [...] }` policy. Set a default using
-`{ "persistence": "workspace" }` in `putered.config.json`; explicit creation
-options override it. Use `environment.stop()` and `environment.resume()`, or let
-execution resume on demand. These APIs are available in SDK 0.3.0 and require
-the matching server. See the [SDK guide](docs/sdk.md).
+Reconnect to the same files in a later process:
 
-Upgrading from 0.2.0: replace `settings.saveScope: "workspace-only"` with
-top-level `persistence: "workspace"`, or `"entire-environment"` with
-`persistence: "full"`. The old `saveScope` field is no longer accepted.
+```ts
+const reopened = await putered.environments.connect(env.id);
+console.log((await reopened.exec('cat hello.txt')).output); // => hello
+```
 
-New environments use native execution by default. Set a default and optional
-per-program preferences in `putered.config.json`, for example
-`{ "execution": { "default": "native", "programs": { "git": "v8" } } }`.
-The values are `native`, `v8` or `auto`; an explicit top-level `execution`
-option on `environments.create()` overrides the config for that environment.
-This is separate from `settings.execution`, which controls the environment's
-execution security policy. Per-program preferences apply to direct `run()`
-commands; they do not select backends for programs launched inside an `exec()`
-shell script.
+Hosted compute requires an active subscription and available credits.
 
-SDK 0.3.0 accepts an optional `name` when creating an environment. Read it through
-`environment.name`; reconnect using the environment ID.
+## Persistence
 
-Save compute defaults in `putered.config.json` with
-`{ "resources": { "cpu": 0.5, "memoryMiB": 512 } }`, and override either field
-through the `resources` option on individual executions. CPU shares under load;
-RAM stays capped. Current hosted sizes stop at 1 vCPU / 1024 MiB. This requires
-matching SDK and server builds; see the [SDK guide](docs/sdk.md).
+Set `persistence` at creation time to control what survives `stop()` and `resume()`:
 
-## Guides and examples
+| Policy | Saved state |
+| --- | --- |
+| `'full'` *(default)* | `/workspace`, mutable home/Node/Python state, and private OCI filesystem |
+| `'workspace'` | `/workspace` only |
+| `'workspace-and-dependencies'` | `/workspace` plus standard Node and Python package directories |
+| `'none'` | Nothing; mutable state is discarded on stop or shutdown |
+| `{ mode: 'custom', include, exclude }` | Explicit absolute guest subtrees (exclusions win) |
 
+```ts
+const env = await putered.environments.create({
+  persistence: 'workspace-and-dependencies',
+});
+
+await env.stop();
+const resumed = await env.resume(); // Or call exec()/run() to resume on demand.
+```
+
+> **Migrating from `0.2.0`:** replace `settings.saveScope: 'workspace-only'` with `persistence: 'workspace'`, and `'entire-environment'` with `persistence: 'full'`. `saveScope` is no longer accepted.
+
+## Execution backends & resources
+
+Configure defaults in `putered.config.json` in your working directory:
+
+```json
+{
+  "persistence": "workspace",
+  "execution": {
+    "default": "native",
+    "programs": { "git": "v8" }
+  },
+  "resources": {
+    "cpu": 0.5,
+    "memoryMiB": 512
+  }
+}
+```
+
+- `execution` selects `'native'`, `'v8'`, or `'auto'` per environment or per direct `run()` program (separate from `settings.execution`, which sets security policy).
+- `resources` can be overridden per command (`env.exec('npm run build', { resources: { cpu: 1, memoryMiB: 1024 } })`). CPU shares fairly up to the cap; RAM is a hard ceiling. Current hosted sizes cap at `1 vCPU / 1024 MiB`.
+- Explicit `environments.create()` options override `putered.config.json` defaults, except an offline `network` policy.
+
+## Exports
+
+- `@putered/sdk` — `Putered`, `Environment`, `CommandHandle`, `TerminalSession`, `CommandError`, `PuteredError`
+- `@putered/sdk/plugins` — `definePlugin`, `defineTool`, `defineAsset`
+- `@putered/sdk/packaging` — runtime artifact helpers
+- `@putered/sdk/build` — `buildPlugin` (requires optional `esbuild` and `typescript`)
+
+## Docs & examples
+
+- [Documentation](https://putered.com/documentation)
 - [SDK guide](docs/sdk.md)
-- [SDK and HTTP API contract](docs/api-contract.md)
-- [Runnable SDK examples](examples/sdk/README.md)
-- [Vibes starter](examples/vibes/README.md)
-- [Typed tools example](examples/typed-tools/README.md)
-- [Stored assets example](examples/stored-assets/README.md)
+- [HTTP API contract](docs/api-contract.md)
+- [Stored binaries & assets](docs/assets.md)
 - [Response contracts](docs/sdk-response-contracts.md)
-- [Publishing guide](docs/publishing.md)
-
-The package exports `@putered/sdk`, `@putered/sdk/plugins`, and
-`@putered/sdk/packaging`. See the SDK guide for plugin building, stored assets,
-command results, and error handling.
+- [Publishing](docs/publishing.md)
+- [SDK examples](examples/sdk/README.md) · [Vibes](examples/vibes/README.md) · [Typed tools](examples/typed-tools/README.md) · [Stored assets](examples/stored-assets/README.md)
